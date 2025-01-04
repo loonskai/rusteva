@@ -1,26 +1,34 @@
-use std::{f32::consts::E, fmt::Debug};
+use std::fmt::Debug;
 use unicode_segmentation::{self, UnicodeSegmentation};
 
-#[derive(PartialEq)]
-#[derive(Debug)]
+use crate::environment::Environment;
+
+
+#[derive(Debug,PartialEq)]
 pub enum Value {
   Int(isize),
-  Str(String)
+  Str(String),
+  Null
 }
 
-#[derive(PartialEq)]
-#[derive(Debug)]
+#[derive(Debug,PartialEq)]
 enum Expr {
   Literal(Value),
   Operation(char, Box<Expr>, Box<Expr>),
   VariableDeclaration(String, String, Value)
 }
 
-pub struct Eva {}
+pub struct Eva {
+  pub global: Environment
+}
 
 impl Eva {
+  // Create global environment
+  // Predefine values: null, true, false
   fn new() -> Self {
-    Eva {}
+    Eva {
+      global: Environment::new()
+    }
   }
 
   fn eval(&self, exp: Expr) -> Option<Value> {
@@ -37,6 +45,7 @@ impl Eva {
               }
               return None
             },
+            Value::Null => None
           }
         }
         Expr::Operation(operator, exp1,exp2 ) => {
@@ -65,7 +74,10 @@ impl Eva {
           if var_keyword != "var".to_string() {
             panic!("Unknown keyword: {}", var_keyword);
           }
-          return Some(value)
+          match &self.global.define(&var_name, value) {
+            Ok(defined_var) => Some(defined_var),
+            Err(e) => panic!("{:?}", e)
+          }
         }
     }
   }
@@ -80,6 +92,7 @@ mod tests {
   fn self_evaluating_expressions() {
     let eva = Eva::new();
 
+    assert_eq!(eva.eval(Expr::Literal(Value::Null)), None);
     assert_eq!(eva.eval(Expr::Literal(Value::Int(1))), Some(Value::Int(1)));
     assert_eq!(eva.eval(Expr::Literal(Value::Int(-10))), Some(Value::Int(-10)));
 
@@ -139,6 +152,7 @@ mod tests {
   fn variable_declaration() {
     let eva = Eva::new();
 
-    assert_eq!(eva.eval(Expr::VariableDeclaration("var".to_string(), "x".to_string(), Value::Int(10))), Some(Value::Int(10)))
+    assert_eq!(eva.eval(Expr::VariableDeclaration("var".to_string(), "x".to_string(), Value::Int(10))), Some(Value::Int(10)));
+    assert_eq!(eva.eval(Expr::VariableDeclaration("var".to_string(), "x".to_string(), Value::Int(10))), Some(Value::Int(10)));
   }
 }

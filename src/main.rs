@@ -1,5 +1,6 @@
 mod eva;
-
+mod environment;
+mod error;
 struct MyString<T> {
     value: T
 }
