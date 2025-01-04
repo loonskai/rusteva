@@ -28,6 +28,14 @@ impl Eva {
                 _ => None
               }
             },
+            '*' => {
+              let n1 = self.eval(*op1).expect("Invalid operand.");
+              let n2 = self.eval(*op2).expect("Invalid operand.");
+              match (n1, n2) {
+                (Exp::Int(num1), Exp::Int(num2)) => Some(Exp::Int(num1 * num2)),
+                _ => None
+              }
+            },
             _ => None
           }
         }
@@ -73,8 +81,39 @@ mod tests {
       Exp::Operation(
         '+', 
         Box::new(Exp::Operation('+', Box::new(Exp::Int(3)), Box::new(Exp::Int(2)))), 
-        Box::new( Exp::Operation('+', Box::new(Exp::Int(3)), Box::new(Exp::Int(2)))),
+        Box::new(Exp::Int(3)),
+      ),
+    ), Some(Exp::Int(8)));
+    assert_eq!(eva.eval(
+      Exp::Operation(
+        '+', 
+        Box::new(Exp::Operation('+', Box::new(Exp::Int(3)), Box::new(Exp::Int(2)))), 
+        Box::new(Exp::Operation('+', Box::new(Exp::Int(3)), Box::new(Exp::Int(2)))),
       ),
     ), Some(Exp::Int(10)));
+  }
+
+  #[test]
+  fn multiplication() {
+    let eva = Eva::new();
+
+    assert_eq!(eva.eval(
+      Exp::Operation('*', Box::new(Exp::Int(3)), Box::new(Exp::Int(2)))), 
+      Some(Exp::Int(6))
+    );
+    assert_eq!(eva.eval(
+      Exp::Operation(
+        '*', 
+        Box::new(Exp::Operation('*', Box::new(Exp::Int(3)), Box::new(Exp::Int(2)))), 
+        Box::new(Exp::Int(3)),
+      ),
+    ), Some(Exp::Int(18)));
+    assert_eq!(eva.eval(
+      Exp::Operation(
+        '*', 
+        Box::new(Exp::Operation('*', Box::new(Exp::Int(3)), Box::new(Exp::Int(2)))), 
+        Box::new(Exp::Operation('*', Box::new(Exp::Int(3)), Box::new(Exp::Int(2)))),
+      ),
+    ), Some(Exp::Int(36)));
   }
 }
