@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use crate::error::RuntimeError;
-use crate::eva::Value;
+use crate::error::{RuntimeErrorKind,RuntimeError};
+use crate::eva::{Expr, Value};
 
 pub struct Environment {
   record: HashMap<String, Value>
@@ -12,25 +12,26 @@ impl Environment {
   }
 
   // (var x 10)
-  pub fn define(mut self, name: &String, value: Value) -> Result<Value, RuntimeError> {
+  pub fn define(&mut self, name: String, value: Value) -> Result<&Value, RuntimeError> {
     // validate variable name
     if !name.starts_with(|c| -> bool {
       let code = u32::from(c);
-      return code >= 141 && code <= 172; 
+      println!("{}", code);
+      return code >= 97 && code <= 122; 
     }) {
-      return Err(RuntimeError::syntax_error(&format!("invalid variable name \"{}\"", &name)));
+      return Err(RuntimeError::syntax_error(format!("invalid identifier name \"{}\"", &name)));
     }
     match self.record.insert(name.clone(), value) {
-      Some(inserted_value) => Ok(inserted_value),
-      None => panic!("Cannot define variable \"{}\"", name)
+      Some(_) => Err(RuntimeError::syntax_error(format!("identifier  \"{}\" has already been defined.", name))),
+      None => self.record.get(&name).ok_or(RuntimeError::syntax_error(format!("fatal. \"{}\" cannot be defined.", name))), 
     }
   }
 
   // x
-  pub fn lookup(&self, name: &String) -> Result<&Value, RuntimeError> {
-    match self.record.get(name) {
+  pub fn lookup(&self, id: &String) -> Result<&Value, RuntimeError> {
+    match self.record.get(id) {
       Some(value) => Ok(value),
-      None => Err(RuntimeError::reference_error(name))
+      None => Err(RuntimeError::reference_error(id))
     }
   }
 
@@ -46,4 +47,27 @@ impl Environment {
       Err(err) => Err(err),
     }
   }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{error::RuntimeError, eva::Value};
+
+    use super::Environment;
+
+    #[test]
+    fn define_and_lookup() {
+      let mut env = Environment::new();
+      
+      assert!(env.record.is_empty());
+      
+      let x = env.define("x".to_string(), Value::Int(10));
+      assert!(matches!(x, Ok(Value::Int(10))));
+
+      let x = env.define("x".to_string(), Value::Int(10));
+      assert!(matches!(x, Err(RuntimeErrorKind)));
+
+      let x = env.lookup(&"x".to_string());
+      assert!(matches!(x, Ok(Value::Int(10))));
+    }
 }

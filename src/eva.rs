@@ -4,7 +4,7 @@ use unicode_segmentation::{self, UnicodeSegmentation};
 use crate::environment::Environment;
 
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Clone)]
 pub enum Value {
   Int(isize),
   Str(String),
@@ -12,10 +12,11 @@ pub enum Value {
 }
 
 #[derive(Debug,PartialEq)]
-enum Expr {
+pub enum Expr {
   Literal(Value),
   Operation(char, Box<Expr>, Box<Expr>),
-  VariableDeclaration(String, String, Value)
+  VariableDeclaration(String, String, Value),
+  Identifier(String)
 }
 
 pub struct Eva {
@@ -31,7 +32,7 @@ impl Eva {
     }
   }
 
-  fn eval(&self, exp: Expr) -> Option<Value> {
+  fn eval(&mut self, exp: Expr) -> Option<Value> {
     match exp {
         Expr::Literal(value) => {
           match value {
@@ -70,13 +71,19 @@ impl Eva {
             _ => None
           }
         }
-        Expr::VariableDeclaration(var_keyword, var_name, value) => {
+        Expr::VariableDeclaration(var_keyword, id_name, value) => {
           if var_keyword != "var".to_string() {
             panic!("Unknown keyword: {}", var_keyword);
           }
-          match &self.global.define(&var_name, value) {
-            Ok(defined_var) => Some(defined_var),
-            Err(e) => panic!("{:?}", e)
+          let _ = &self.global.define(id_name, value.clone())
+            .map_err(|e| panic!("{:?}", e));
+          Some(value) 
+        }
+        Expr::Identifier(id) => {
+          // TODO: Check for reserved words
+          match self.global.lookup(&id) {
+            Ok(value) => Some(value.clone()),
+            Err(err) => panic!("{:?}", err)
           }
         }
     }
@@ -90,7 +97,7 @@ mod tests {
 
   #[test]
   fn self_evaluating_expressions() {
-    let eva = Eva::new();
+    let mut eva = Eva::new();
 
     assert_eq!(eva.eval(Expr::Literal(Value::Null)), None);
     assert_eq!(eva.eval(Expr::Literal(Value::Int(1))), Some(Value::Int(1)));
@@ -102,7 +109,7 @@ mod tests {
 
   #[test]
   fn addition() {
-    let eva = Eva::new();
+    let mut eva = Eva::new();
 
     assert_eq!(eva.eval(
       Expr::Operation('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
@@ -126,7 +133,7 @@ mod tests {
 
   #[test]
   fn multiplication() {
-    let eva = Eva::new();
+    let mut eva = Eva::new();
 
     assert_eq!(eva.eval(
       Expr::Operation('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
@@ -150,9 +157,9 @@ mod tests {
 
   #[test]
   fn variable_declaration() {
-    let eva = Eva::new();
+    let mut eva = Eva::new();
 
     assert_eq!(eva.eval(Expr::VariableDeclaration("var".to_string(), "x".to_string(), Value::Int(10))), Some(Value::Int(10)));
-    assert_eq!(eva.eval(Expr::VariableDeclaration("var".to_string(), "x".to_string(), Value::Int(10))), Some(Value::Int(10)));
+    assert_eq!(eva.eval(Expr::Identifier("x".to_string())), Some(Value::Int(10)));
   }
 }

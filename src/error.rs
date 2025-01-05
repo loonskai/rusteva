@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 #[derive(Debug)]
-enum RuntimeErrorKind {
+pub enum RuntimeErrorKind {
   ReferenceError,
   SyntaxError,
 }
@@ -26,7 +26,7 @@ impl RuntimeError {
       format!("Reference error: variable \"{}\" is not defined.", var_name))
   }
 
-  pub fn syntax_error(details: &String) -> Self {
+  pub fn syntax_error(details: String) -> Self {
     Self::new(
       RuntimeErrorKind::SyntaxError,
       format!("Syntax error: \"{}\".", details))
