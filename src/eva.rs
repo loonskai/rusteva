@@ -8,7 +8,8 @@ use crate::environment::Environment;
 pub enum Value {
   Int(isize),
   Str(String),
-  Null
+  Null,
+  Boolean(bool)
 }
 
 #[derive(Debug,PartialEq)]
@@ -27,19 +28,20 @@ impl Eva {
   // Create global environment
   // Predefine values: null, true, false
   fn new() -> Self {
+    let mut global_env = Environment::new();
+    global_env.define("null".to_string(), Value::Null);
+    global_env.define("true".to_string(), Value::Boolean(true));
+    global_env.define("false".to_string(), Value::Boolean(false)); 
     Eva {
-      global: Environment::new()
+      global: global_env,
     }
   }
 
   fn eval(&mut self, exp: Expr, env: &mut Environment) -> Option<Value> {
-    // let env_ref = env;
     match exp {
         Expr::Literal(value) => {
           match value {
-            Value::Int(n) => {
-              return Some(Value::Int(n));
-            },
+            Value::Int(n) => Some(Value::Int(n)),
             Value::Str(s) => {
               if s.graphemes(true).nth(0).unwrap() == r#"""# && s.graphemes(true).last().unwrap() == r#"""# {
                 let with_quotation_trimmed = s[1..s.len()-1].to_string();
@@ -47,6 +49,7 @@ impl Eva {
               }
               return None
             },
+            Value::Boolean(b) => Some(Value::Boolean(b)),
             Value::Null => None
           }
         }
@@ -104,12 +107,44 @@ mod tests {
   use super::*;
 
   #[test]
+  fn default_globals() {
+    let mut eva = Eva::new();
+
+    assert!(
+      matches!(
+        eva.global.lookup(&"null".to_string()),
+        Ok(Value::Null)
+      )
+    );
+    assert!(
+      matches!(
+        eva.global.lookup(&"true".to_string()),
+        Ok(Value::Boolean(true))
+      )
+    );
+    assert!(
+      matches!(
+        eva.global.lookup(&"false".to_string()),
+        Ok(Value::Boolean(false))
+      )
+    );
+  }
+
+  #[test]
   fn self_evaluating_expressions() {
     let mut eva = Eva::new();
 
     assert_eq!(
       eva.eval(Expr::Literal(Value::Null), &mut eva.global.clone()), 
       None
+    );
+    assert_eq!(
+      eva.eval(Expr::Literal(Value::Boolean(true)), &mut eva.global.clone()), 
+      Some(Value::Boolean(true))
+    );
+    assert_eq!(
+      eva.eval(Expr::Literal(Value::Boolean(false)), &mut eva.global.clone()), 
+      Some(Value::Boolean(false))
     );
     assert_eq!(
       eva.eval(Expr::Literal(Value::Int(1)), &mut eva.global.clone()), 
@@ -325,12 +360,11 @@ mod tests {
       ), 
       Some(Value::Int(10))
     );
-    // assert_eq!(
-    //   eva.eval(
-    //     Expr::Identifier("x".to_string()),
-    //     &mut eva.global
-    //   ), 
-    //   Some(Value::Int(10))
-    // );
+    assert!(
+      matches!(
+        env.lookup(&"x".to_string()),
+        Ok(Value::Int(10))
+      )
+    );
   }
 }
