@@ -16,7 +16,7 @@ pub enum Value {
 pub enum Expr {
   Literal(Value),
   BinaryExpression(char, Box<Expr>, Box<Expr>),
-  VariableDeclaration(String, String, Value),
+  VariableDeclaration(String, String, Box<Expr>),
   Identifier(String)
 }
 
@@ -67,13 +67,20 @@ impl Eva {
             _ => None
           }
         }
-        Expr::VariableDeclaration(var_keyword, id_name, value) => {
+        Expr::VariableDeclaration(var_keyword, id_name, exp) => {
           if var_keyword != "var".to_string() {
             panic!("Unknown keyword: {}", var_keyword);
           }
-          let _ = &env.define(id_name, value.clone())
-            .map_err(|e| panic!("{:?}", e));
-          Some(value) 
+          let result = match self.eval(*exp, env) {
+            Some(value) => {
+              env.define(id_name, value)
+            },
+            None => panic!("Unable to declare variable")
+          };
+          match result {
+              Ok(value) => Some(value.clone()),
+              Err(err) => panic!("{:?}", err),
+          }
         }
         Expr::Identifier(id) => {
           // TODO: Check for reserved words
@@ -354,7 +361,7 @@ mod tests {
         Expr::VariableDeclaration(
           "var".to_string(), 
           "x".to_string(), 
-          Value::Int(10)
+         Box::new(Expr::Literal(Value::Int(10)))
         ),
         &mut env,
       ), 
@@ -364,6 +371,26 @@ mod tests {
       matches!(
         env.lookup(&"x".to_string()),
         Ok(Value::Int(10))
+      )
+    );
+
+    eva.eval(
+  Expr::VariableDeclaration(
+        "var".to_string(),
+        "z".to_string(),
+        Box::new(
+          Expr::BinaryExpression(
+            '+',
+            Box::new(Expr::Literal(Value::Int(2))),
+            Box::new(Expr::Literal(Value::Int(4))),
+        ),
+      )),
+      &mut env
+    );
+    assert!(
+      matches!(
+        env.lookup(&"z".to_string()),
+        Ok(Value::Int(6))
       )
     );
   }
