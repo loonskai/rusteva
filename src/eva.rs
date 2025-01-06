@@ -51,23 +51,15 @@ impl Eva {
         }
         Expr::BinaryExpression(operator, exp1,exp2 ) => {
           match operator {
-            '+' => {
-              // Q: How to reuse the parts from each arm?
-              let n1 = self.eval(*exp1).expect("Invalid operand.");
-              let n2 = self.eval(*exp2).expect("Invalid operand.");
-              match (n1, n2) {
-                (Value::Int(num1), Value::Int(num2)) => Some(Value::Int(num1 + num2)),
-                _ => None
+            '+' => self.binary_operation(exp1, exp2, |n1, n2| n1 + n2),
+            '-' => self.binary_operation(exp1, exp2, |n1, n2| n1 - n2),
+            '*' => self.binary_operation(exp1, exp2, |n1, n2| n1 * n2),
+            '/' => self.binary_operation(exp1, exp2, |n1, n2| {
+              if n2 == 0 {
+                panic!("Attempt to divide by zero.")
               }
-            },
-            '*' => {
-              let n1 = self.eval(*exp1).expect("Invalid operand.");
-              let n2 = self.eval(*exp2).expect("Invalid operand.");
-              match (n1, n2) {
-                (Value::Int(num1), Value::Int(num2)) => Some(Value::Int(num1 * num2)),
-                _ => None
-              }
-            },
+              n1 / n2
+            }),
             _ => None
           }
         }
@@ -87,6 +79,21 @@ impl Eva {
           }
         }
     }
+  }
+
+  fn binary_operation<F>(&mut self, exp1: Box<Expr>, exp2: Box<Expr>, operation: F) -> Option<Value> 
+  where
+    F: Fn(isize, isize) -> isize
+  {
+    let v1 = self.eval(*exp1).expect("Invalid operand.");
+    let v2 = self.eval(*exp2).expect("Invalid operand.");
+    match (v1, v2) {
+      (Value::Int(n1), Value::Int(n2)) => {
+        Some(Value::Int(operation(n1, n2)))
+      },
+      _ => None
+    }
+
   }
 }
 
@@ -132,6 +139,30 @@ mod tests {
   }
 
   #[test]
+  fn extraction() {
+    let mut eva = Eva::new();
+
+    assert_eq!(eva.eval(
+      Expr::BinaryExpression('-', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+      Some(Value::Int(1))
+    );
+    assert_eq!(eva.eval(
+      Expr::BinaryExpression(
+        '-', 
+        Box::new(Expr::BinaryExpression('-', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+        Box::new(Expr::Literal(Value::Int(3))),
+      ),
+    ), Some(Value::Int(-2)));
+    assert_eq!(eva.eval(
+      Expr::BinaryExpression(
+        '-', 
+        Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+        Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
+      ),
+    ), Some(Value::Int(0)));
+  }
+
+  #[test]
   fn multiplication() {
     let mut eva = Eva::new();
 
@@ -153,6 +184,45 @@ mod tests {
         Box::new(Expr::BinaryExpression('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
       ),
     ), Some(Value::Int(36)));
+  }
+
+  #[test]
+  fn division() {
+    let mut eva = Eva::new();
+
+    assert_eq!(eva.eval(
+      Expr::BinaryExpression('/', Box::new(Expr::Literal(Value::Int(25))), Box::new(Expr::Literal(Value::Int(5))))), 
+      Some(Value::Int(5))
+    );
+    assert_eq!(eva.eval(
+      Expr::BinaryExpression(
+        '/', 
+        Box::new(Expr::BinaryExpression('/', Box::new(Expr::Literal(Value::Int(25))), Box::new(Expr::Literal(Value::Int(5))))), 
+        Box::new(Expr::Literal(Value::Int(5))),
+      ),
+    ), Some(Value::Int(1)));
+    assert_eq!(eva.eval(
+      Expr::BinaryExpression(
+        '/', 
+        Box::new(Expr::Literal(Value::Int(0))),
+        Box::new(Expr::Literal(Value::Int(3))), 
+      ),
+    ), Some(Value::Int(0)));
+    
+  }
+
+  #[test]
+  #[should_panic]
+  fn division_by_zero() {
+    let mut eva = Eva::new();
+
+    assert_eq!(eva.eval(
+      Expr::BinaryExpression(
+        '/', 
+        Box::new(Expr::Literal(Value::Int(3))),
+        Box::new(Expr::Literal(Value::Int(0))), 
+      ),
+    ), Some(Value::Int(0)));
   }
 
   #[test]
