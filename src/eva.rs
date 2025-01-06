@@ -14,7 +14,7 @@ pub enum Value {
 #[derive(Debug,PartialEq)]
 pub enum Expr {
   Literal(Value),
-  Operation(char, Box<Expr>, Box<Expr>),
+  BinaryExpression(char, Box<Expr>, Box<Expr>),
   VariableDeclaration(String, String, Value),
   Identifier(String)
 }
@@ -49,7 +49,7 @@ impl Eva {
             Value::Null => None
           }
         }
-        Expr::Operation(operator, exp1,exp2 ) => {
+        Expr::BinaryExpression(operator, exp1,exp2 ) => {
           match operator {
             '+' => {
               // Q: How to reuse the parts from each arm?
@@ -112,21 +112,21 @@ mod tests {
     let mut eva = Eva::new();
 
     assert_eq!(eva.eval(
-      Expr::Operation('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+      Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
       Some(Value::Int(5))
     );
     assert_eq!(eva.eval(
-      Expr::Operation(
+      Expr::BinaryExpression(
         '+', 
-        Box::new(Expr::Operation('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+        Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
         Box::new(Expr::Literal(Value::Int(3))),
       ),
     ), Some(Value::Int(8)));
     assert_eq!(eva.eval(
-      Expr::Operation(
+      Expr::BinaryExpression(
         '+', 
-        Box::new(Expr::Operation('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-        Box::new(Expr::Operation('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
+        Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+        Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
       ),
     ), Some(Value::Int(10)));
   }
@@ -136,21 +136,21 @@ mod tests {
     let mut eva = Eva::new();
 
     assert_eq!(eva.eval(
-      Expr::Operation('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+      Expr::BinaryExpression('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
       Some(Value::Int(6))
     );
     assert_eq!(eva.eval(
-      Expr::Operation(
+      Expr::BinaryExpression(
         '*', 
-        Box::new(Expr::Operation('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+        Box::new(Expr::BinaryExpression('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
         Box::new(Expr::Literal(Value::Int(3))),
       ),
     ), Some(Value::Int(18)));
     assert_eq!(eva.eval(
-      Expr::Operation(
+      Expr::BinaryExpression(
         '*', 
-        Box::new(Expr::Operation('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-        Box::new(Expr::Operation('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
+        Box::new(Expr::BinaryExpression('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+        Box::new(Expr::BinaryExpression('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
       ),
     ), Some(Value::Int(36)));
   }
