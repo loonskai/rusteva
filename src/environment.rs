@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use crate::error::{RuntimeErrorKind,RuntimeError};
 use crate::eva::{Expr, Value};
 
+#[derive(Default,Clone)]
 pub struct Environment {
   record: HashMap<String, Value>
 }
@@ -12,18 +13,18 @@ impl Environment {
   }
 
   // (var x 10)
-  pub fn define(&mut self, name: String, value: Value) -> Result<&Value, RuntimeError> {
-    // validate variable name
-    if !name.starts_with(|c| -> bool {
+  pub fn define(&mut self, id: String, value: Value) -> Result<&Value, RuntimeError> {
+    // validate id name
+    if !id.starts_with(|c| -> bool {
       let code = u32::from(c);
       println!("{}", code);
       return code >= 97 && code <= 122; 
     }) {
-      return Err(RuntimeError::syntax_error(format!("invalid identifier name \"{}\"", &name)));
+      return Err(RuntimeError::syntax_error(format!("invalid identifier name \"{}\"", &id)));
     }
-    match self.record.insert(name.clone(), value) {
-      Some(_) => Err(RuntimeError::syntax_error(format!("identifier  \"{}\" has already been defined.", name))),
-      None => self.record.get(&name).ok_or(RuntimeError::syntax_error(format!("fatal. \"{}\" cannot be defined.", name))), 
+    match self.record.insert(id.clone(), value) {
+      Some(_) => Err(RuntimeError::syntax_error(format!("identifier  \"{}\" has already been defined.", id))),
+      None => self.record.get(&id).ok_or(RuntimeError::syntax_error(format!("fatal. \"{}\" cannot be defined.", id))), 
     }
   }
 
@@ -36,12 +37,12 @@ impl Environment {
   }
 
   // (set x 20)
-  pub fn set(mut self, name: &String, value: Value) -> Result<Value, RuntimeError> {
-    match self.lookup(name) {
+  pub fn set(&mut self, id: String, value: Value) -> Result<Value, RuntimeError> {
+    match self.lookup(&id) {
       Ok(_) => {
-        match self.record.insert(name.clone(), value) {
+        match self.record.insert(id.clone(), value) {
           Some(inserted_value) => Ok(inserted_value),
-          None => panic!("Cannot define variable \"{}\"", name)
+          None => panic!("Cannot set identificator \"{}\".", id)
         }
       },
       Err(err) => Err(err),
@@ -69,5 +70,14 @@ mod tests {
 
       let x = env.lookup(&"x".to_string());
       assert!(matches!(x, Ok(Value::Int(10))));
+    }
+
+    #[test]
+    fn set_value() {
+      let mut env = Environment::new();
+      env.define("x".to_string(), Value::Int(10));
+      env.set("x".to_string(), Value::Int(20));
+      let x = env.lookup(&"x".to_string()).expect("Cannot get value x");
+      assert!(matches!(x, Value::Int(20)));
     }
 }

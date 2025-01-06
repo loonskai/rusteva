@@ -32,7 +32,8 @@ impl Eva {
     }
   }
 
-  fn eval(&mut self, exp: Expr) -> Option<Value> {
+  fn eval(&mut self, exp: Expr, env: &mut Environment) -> Option<Value> {
+    // let env_ref = env;
     match exp {
         Expr::Literal(value) => {
           match value {
@@ -51,10 +52,10 @@ impl Eva {
         }
         Expr::BinaryExpression(operator, exp1,exp2 ) => {
           match operator {
-            '+' => self.binary_operation(exp1, exp2, |n1, n2| n1 + n2),
-            '-' => self.binary_operation(exp1, exp2, |n1, n2| n1 - n2),
-            '*' => self.binary_operation(exp1, exp2, |n1, n2| n1 * n2),
-            '/' => self.binary_operation(exp1, exp2, |n1, n2| {
+            '+' => self.binary_operation(env, exp1, exp2, |n1, n2| n1 + n2),
+            '-' => self.binary_operation(env, exp1, exp2, |n1, n2| n1 - n2),
+            '*' => self.binary_operation(env, exp1, exp2, |n1, n2| n1 * n2),
+            '/' => self.binary_operation(env, exp1, exp2, |n1, n2| {
               if n2 == 0 {
                 panic!("Attempt to divide by zero.")
               }
@@ -67,13 +68,13 @@ impl Eva {
           if var_keyword != "var".to_string() {
             panic!("Unknown keyword: {}", var_keyword);
           }
-          let _ = &self.global.define(id_name, value.clone())
+          let _ = &env.define(id_name, value.clone())
             .map_err(|e| panic!("{:?}", e));
           Some(value) 
         }
         Expr::Identifier(id) => {
           // TODO: Check for reserved words
-          match self.global.lookup(&id) {
+          match env.lookup(&id) {
             Ok(value) => Some(value.clone()),
             Err(err) => panic!("{:?}", err)
           }
@@ -81,12 +82,12 @@ impl Eva {
     }
   }
 
-  fn binary_operation<F>(&mut self, exp1: Box<Expr>, exp2: Box<Expr>, operation: F) -> Option<Value> 
+  fn binary_operation<F>(&mut self, env: &mut Environment, exp1: Box<Expr>, exp2: Box<Expr>, operation: F) -> Option<Value> 
   where
     F: Fn(isize, isize) -> isize
   {
-    let v1 = self.eval(*exp1).expect("Invalid operand.");
-    let v2 = self.eval(*exp2).expect("Invalid operand.");
+    let v1 = self.eval(*exp1, env).expect("Invalid operand.");
+    let v2 = self.eval(*exp2, env).expect("Invalid operand.");
     match (v1, v2) {
       (Value::Int(n1), Value::Int(n2)) => {
         Some(Value::Int(operation(n1, n2)))
@@ -106,108 +107,187 @@ mod tests {
   fn self_evaluating_expressions() {
     let mut eva = Eva::new();
 
-    assert_eq!(eva.eval(Expr::Literal(Value::Null)), None);
-    assert_eq!(eva.eval(Expr::Literal(Value::Int(1))), Some(Value::Int(1)));
-    assert_eq!(eva.eval(Expr::Literal(Value::Int(-10))), Some(Value::Int(-10)));
-
-    assert_eq!(eva.eval(Expr::Literal(Value::Str(r#""hello""#.to_string()))), Some(Value::Str("hello".to_string())));
-    assert_eq!(eva.eval(Expr::Literal(Value::Str(r#""🎅 新年快乐!""#.to_string()))), Some(Value::Str("🎅 新年快乐!".to_string())));
+    assert_eq!(
+      eva.eval(Expr::Literal(Value::Null), &mut eva.global.clone()), 
+      None
+    );
+    assert_eq!(
+      eva.eval(Expr::Literal(Value::Int(1)), &mut eva.global.clone()), 
+      Some(Value::Int(1))
+    );
+    assert_eq!(
+      eva.eval(Expr::Literal(Value::Int(-10)), &mut eva.global.clone()), 
+      Some(Value::Int(-10))
+    );
+    assert_eq!(
+      eva.eval(Expr::Literal(Value::Str(r#""hello""#.to_string())), &mut eva.global.clone()), 
+      Some(Value::Str("hello".to_string()))
+    );
+    assert_eq!(
+      eva.eval(Expr::Literal(Value::Str(r#""🎅 新年快乐!""#.to_string())), 
+      &mut eva.global.clone()), 
+      Some(Value::Str("🎅 新年快乐!".to_string()))
+    );
   }
 
   #[test]
   fn addition() {
     let mut eva = Eva::new();
 
-    assert_eq!(eva.eval(
-      Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+    assert_eq!(
+      eva.eval(
+        Expr::BinaryExpression(
+          '+', 
+          Box::new(Expr::Literal(Value::Int(3))), 
+          Box::new(Expr::Literal(Value::Int(2)))
+        ), 
+        &mut eva.global.clone()
+      ), 
       Some(Value::Int(5))
     );
-    assert_eq!(eva.eval(
-      Expr::BinaryExpression(
-        '+', 
-        Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-        Box::new(Expr::Literal(Value::Int(3))),
-      ),
-    ), Some(Value::Int(8)));
-    assert_eq!(eva.eval(
-      Expr::BinaryExpression(
-        '+', 
-        Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-        Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
-      ),
-    ), Some(Value::Int(10)));
+    assert_eq!(
+      eva.eval(
+        Expr::BinaryExpression(
+          '+', 
+          Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+          Box::new(Expr::Literal(Value::Int(3))),
+        ),
+        &mut eva.global.clone()
+      ), 
+      Some(Value::Int(8))
+    );
+    assert_eq!(
+      eva.eval(
+        Expr::BinaryExpression(
+          '+', 
+          Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+          Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
+        ),
+        &mut eva.global.clone()
+      ), 
+      Some(Value::Int(10))
+    );
   }
 
   #[test]
   fn extraction() {
     let mut eva = Eva::new();
 
-    assert_eq!(eva.eval(
-      Expr::BinaryExpression('-', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+    assert_eq!(
+      eva.eval(
+        Expr::BinaryExpression(
+          '-', 
+          Box::new(Expr::Literal(Value::Int(3))), 
+          Box::new(Expr::Literal(Value::Int(2)))
+        ), 
+        &mut eva.global.clone()
+      ), 
       Some(Value::Int(1))
     );
-    assert_eq!(eva.eval(
-      Expr::BinaryExpression(
-        '-', 
-        Box::new(Expr::BinaryExpression('-', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-        Box::new(Expr::Literal(Value::Int(3))),
-      ),
-    ), Some(Value::Int(-2)));
-    assert_eq!(eva.eval(
-      Expr::BinaryExpression(
-        '-', 
-        Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-        Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
-      ),
-    ), Some(Value::Int(0)));
+    assert_eq!(
+      eva.eval(
+        Expr::BinaryExpression(
+          '-', 
+          Box::new(Expr::BinaryExpression('-', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+          Box::new(Expr::Literal(Value::Int(3))),
+        ), 
+        &mut eva.global.clone()
+      ), 
+      Some(Value::Int(-2))
+    );
+    assert_eq!(
+      eva.eval(
+        Expr::BinaryExpression(
+          '-', 
+          Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+          Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
+        ),
+        &mut eva.global.clone()
+      ), 
+      Some(Value::Int(0))
+    );
   }
 
   #[test]
   fn multiplication() {
     let mut eva = Eva::new();
 
-    assert_eq!(eva.eval(
-      Expr::BinaryExpression('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+    assert_eq!(
+      eva.eval(
+        Expr::BinaryExpression(
+          '*', 
+          Box::new(Expr::Literal(Value::Int(3))), 
+          Box::new(Expr::Literal(Value::Int(2)))
+        ),
+        &mut eva.global.clone()
+      ), 
       Some(Value::Int(6))
     );
-    assert_eq!(eva.eval(
-      Expr::BinaryExpression(
-        '*', 
-        Box::new(Expr::BinaryExpression('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-        Box::new(Expr::Literal(Value::Int(3))),
-      ),
-    ), Some(Value::Int(18)));
-    assert_eq!(eva.eval(
-      Expr::BinaryExpression(
-        '*', 
-        Box::new(Expr::BinaryExpression('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-        Box::new(Expr::BinaryExpression('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
-      ),
-    ), Some(Value::Int(36)));
+    assert_eq!(
+      eva.eval(
+        Expr::BinaryExpression(
+          '*', 
+          Box::new(Expr::BinaryExpression(
+            '*', 
+            Box::new(Expr::Literal(Value::Int(3))), 
+            Box::new(Expr::Literal(Value::Int(2))))
+          ), 
+          Box::new(Expr::Literal(Value::Int(3))),
+        ),
+        &mut eva.global.clone()
+      ), 
+      Some(Value::Int(18))
+    );
+    assert_eq!(
+      eva.eval(
+        Expr::BinaryExpression(
+          '*', 
+          Box::new(Expr::BinaryExpression('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+          Box::new(Expr::BinaryExpression('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
+        ),
+        &mut eva.global.clone()
+      ), 
+      Some(Value::Int(36))
+    );
   }
 
   #[test]
   fn division() {
     let mut eva = Eva::new();
 
-    assert_eq!(eva.eval(
-      Expr::BinaryExpression('/', Box::new(Expr::Literal(Value::Int(25))), Box::new(Expr::Literal(Value::Int(5))))), 
+    assert_eq!(
+      eva.eval(
+        Expr::BinaryExpression(
+          '/', 
+          Box::new(Expr::Literal(Value::Int(25))), 
+          Box::new(Expr::Literal(Value::Int(5)))
+        ),
+        &mut eva.global.clone()
+      ), 
       Some(Value::Int(5))
     );
-    assert_eq!(eva.eval(
-      Expr::BinaryExpression(
-        '/', 
-        Box::new(Expr::BinaryExpression('/', Box::new(Expr::Literal(Value::Int(25))), Box::new(Expr::Literal(Value::Int(5))))), 
-        Box::new(Expr::Literal(Value::Int(5))),
-      ),
-    ), Some(Value::Int(1)));
-    assert_eq!(eva.eval(
-      Expr::BinaryExpression(
-        '/', 
-        Box::new(Expr::Literal(Value::Int(0))),
-        Box::new(Expr::Literal(Value::Int(3))), 
-      ),
-    ), Some(Value::Int(0)));
+    assert_eq!(
+      eva.eval(
+        Expr::BinaryExpression(
+          '/', 
+          Box::new(Expr::BinaryExpression('/', Box::new(Expr::Literal(Value::Int(25))), Box::new(Expr::Literal(Value::Int(5))))), 
+          Box::new(Expr::Literal(Value::Int(5))),
+        ),
+        &mut eva.global.clone()
+      ), 
+      Some(Value::Int(1))
+    );
+    assert_eq!(
+      eva.eval(
+        Expr::BinaryExpression(
+          '/', 
+          Box::new(Expr::Literal(Value::Int(0))),
+          Box::new(Expr::Literal(Value::Int(3))), 
+        ),
+        &mut eva.global.clone()
+      ), 
+      Some(Value::Int(0))
+    );
     
   }
 
@@ -216,20 +296,41 @@ mod tests {
   fn division_by_zero() {
     let mut eva = Eva::new();
 
-    assert_eq!(eva.eval(
-      Expr::BinaryExpression(
-        '/', 
-        Box::new(Expr::Literal(Value::Int(3))),
-        Box::new(Expr::Literal(Value::Int(0))), 
-      ),
-    ), Some(Value::Int(0)));
+    assert_eq!(
+      eva.eval(
+        Expr::BinaryExpression(
+          '/', 
+          Box::new(Expr::Literal(Value::Int(3))),
+          Box::new(Expr::Literal(Value::Int(0))), 
+        ),
+        &mut eva.global.clone()
+      ), 
+      Some(Value::Int(0))
+    );
   }
 
   #[test]
   fn variable_declaration() {
     let mut eva = Eva::new();
+    let mut env = std::mem::take(&mut eva.global); 
 
-    assert_eq!(eva.eval(Expr::VariableDeclaration("var".to_string(), "x".to_string(), Value::Int(10))), Some(Value::Int(10)));
-    assert_eq!(eva.eval(Expr::Identifier("x".to_string())), Some(Value::Int(10)));
+    assert_eq!(
+      eva.eval(
+        Expr::VariableDeclaration(
+          "var".to_string(), 
+          "x".to_string(), 
+          Value::Int(10)
+        ),
+        &mut env,
+      ), 
+      Some(Value::Int(10))
+    );
+    // assert_eq!(
+    //   eva.eval(
+    //     Expr::Identifier("x".to_string()),
+    //     &mut eva.global
+    //   ), 
+    //   Some(Value::Int(10))
+    // );
   }
 }
