@@ -1,3 +1,3 @@
-mod eva;
+pub mod eva;
 mod error;
 mod environment;

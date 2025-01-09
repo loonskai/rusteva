@@ -17,7 +17,8 @@ pub enum Expr {
   Literal(Value),
   BinaryExpression(char, Box<Expr>, Box<Expr>),
   VariableDeclaration(String, String, Box<Expr>),
-  Identifier(String)
+  Identifier(String),
+  BlockStatement(String, Vec<Expr>)
 }
 
 pub struct Eva {
@@ -27,17 +28,17 @@ pub struct Eva {
 impl Eva {
   // Create global environment
   // Predefine values: null, true, false
-  fn new() -> Self {
+  pub fn new() -> Self {
     let mut global_env = Environment::new();
-    global_env.define("null".to_string(), Value::Null);
-    global_env.define("true".to_string(), Value::Boolean(true));
-    global_env.define("false".to_string(), Value::Boolean(false)); 
+    let _ = global_env.define("null".to_string(), Value::Null);
+    let _ = global_env.define("true".to_string(), Value::Boolean(true));
+    let _ = global_env.define("false".to_string(), Value::Boolean(false)); 
     Eva {
       global: global_env,
     }
   }
 
-  fn eval(&mut self, exp: Expr, env: &mut Environment) -> Option<Value> {
+  pub fn eval(&mut self, exp: Expr, env: &mut Environment) -> Option<Value> {
     match exp {
         Expr::Literal(value) => {
           match value {
@@ -88,6 +89,13 @@ impl Eva {
             Ok(value) => Some(value.clone()),
             Err(err) => panic!("{:?}", err)
           }
+        },
+        Expr::BlockStatement(keyword, expressions) => {
+          if keyword != "begin" {
+            panic!("Invalid block statement")
+          }
+          let mut block_env = Environment::new();
+          self.eval_block(expressions, &mut block_env)
         }
     }
   }
@@ -104,7 +112,14 @@ impl Eva {
       },
       _ => None
     }
+  }
 
+  fn eval_block(&mut self, expressions: Vec<Expr>, env: &mut Environment) -> Option<Value> {
+    let mut result = None;
+    for exp in expressions {
+      result = self.eval(exp, env);
+    }
+    result
   }
 }
 
@@ -115,7 +130,7 @@ mod tests {
 
   #[test]
   fn default_globals() {
-    let mut eva = Eva::new();
+    let eva = Eva::new();
 
     assert!(
       matches!(
@@ -375,7 +390,7 @@ mod tests {
     );
 
     eva.eval(
-  Expr::VariableDeclaration(
+      Expr::VariableDeclaration(
         "var".to_string(),
         "z".to_string(),
         Box::new(
@@ -393,5 +408,29 @@ mod tests {
         Ok(Value::Int(6))
       )
     );
+  }
+
+  #[test]
+  fn block_statement() {
+    let mut eva = Eva::new();
+    let expr1 =  Expr::VariableDeclaration("var".to_string(), "x".to_string(), Box::new(Expr::Literal(Value::Int(10))));
+    let expr2 = Expr::VariableDeclaration("var".to_string(), "y".to_string(), Box::new(Expr::Literal(Value::Int(20))));
+    let expr3 = Expr::BinaryExpression(
+      '+',
+      Box::new(Expr::BinaryExpression(
+        '*', 
+        Box::new(Expr::Identifier("x".to_string())),
+        Box::new(Expr::Identifier("y".to_string())))
+      ),
+      Box::new(Expr::Literal(Value::Int(30))),
+    );
+
+    assert_eq!(
+      eva.eval(
+        Expr::BlockStatement("begin".to_string(), vec![expr1, expr2, expr3]), 
+        &mut eva.global.clone()
+      ),
+      Some(Value::Int(230))
+    )
   }
 }

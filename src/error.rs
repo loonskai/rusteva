@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 #[derive(Debug)]
 pub enum RuntimeErrorKind {
   ReferenceError,

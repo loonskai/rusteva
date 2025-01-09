@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use crate::error::{RuntimeErrorKind,RuntimeError};
-use crate::eva::{Expr, Value};
+use crate::error::RuntimeError;
+use crate::eva::Value;
 
 #[derive(Default,Clone)]
 pub struct Environment {
@@ -52,7 +52,7 @@ impl Environment {
 
 #[cfg(test)]
 mod tests {
-    use crate::{error::RuntimeError, eva::Value};
+    use crate::eva::Value;
 
     use super::Environment;
 
@@ -75,8 +75,8 @@ mod tests {
     #[test]
     fn set_value() {
       let mut env = Environment::new();
-      env.define("x".to_string(), Value::Int(10));
-      env.set("x".to_string(), Value::Int(20));
+      let _ = env.define("x".to_string(), Value::Int(10));
+      let _ = env.set("x".to_string(), Value::Int(20));
       let x = env.lookup(&"x".to_string()).expect("Cannot get value x");
       assert!(matches!(x, Value::Int(20)));
     }
