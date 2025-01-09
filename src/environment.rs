@@ -2,14 +2,15 @@ use std::collections::HashMap;
 use crate::error::RuntimeError;
 use crate::eva::Value;
 
-#[derive(Default,Clone)]
-pub struct Environment {
-  record: HashMap<String, Value>
+#[derive(Clone, Default)]
+pub struct Environment<'a> {
+  record: HashMap<String, Value>,
+  parent: Option<&'a Environment<'a>>
 }
 
-impl Environment {
-  pub fn new() -> Self {
-    Environment { record: HashMap::new() }
+impl<'a> Environment<'a> {
+  pub fn new(parent: Option<&'a Environment<'a>>) -> Self {
+    Environment { record: HashMap::new(), parent }
   }
 
   // (var x 10)
@@ -30,9 +31,16 @@ impl Environment {
 
   // x
   pub fn lookup(&self, id: &String) -> Result<&Value, RuntimeError> {
-    match self.record.get(id) {
+    let mut current_env = self;
+    match current_env.record.get(id) {
       Some(value) => Ok(value),
-      None => Err(RuntimeError::reference_error(id))
+      None => {
+        while current_env.parent.is_some() {
+          current_env = current_env.parent.unwrap();
+          return current_env.lookup(id);
+        }
+        Err(RuntimeError::reference_error(id))
+      }
     }
   }
 
@@ -58,7 +66,7 @@ mod tests {
 
     #[test]
     fn define_and_lookup() {
-      let mut env = Environment::new();
+      let mut env = Environment::new(None);
       
       assert!(env.record.is_empty());
       
@@ -74,7 +82,7 @@ mod tests {
 
     #[test]
     fn set_value() {
-      let mut env = Environment::new();
+      let mut env = Environment::new(None);
       let _ = env.define("x".to_string(), Value::Int(10));
       let _ = env.set("x".to_string(), Value::Int(20));
       let x = env.lookup(&"x".to_string()).expect("Cannot get value x");

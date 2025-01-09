@@ -21,15 +21,15 @@ pub enum Expr {
   BlockStatement(String, Vec<Expr>)
 }
 
-pub struct Eva {
-  pub global: Environment
+pub struct Eva<'a> {
+  pub global: Environment<'a>
 }
 
-impl Eva {
+impl<'a> Eva<'a> {
   // Create global environment
   // Predefine values: null, true, false
   pub fn new() -> Self {
-    let mut global_env = Environment::new();
+    let mut global_env = Environment::new(None);
     let _ = global_env.define("null".to_string(), Value::Null);
     let _ = global_env.define("true".to_string(), Value::Boolean(true));
     let _ = global_env.define("false".to_string(), Value::Boolean(false)); 
@@ -94,7 +94,7 @@ impl Eva {
           if keyword != "begin" {
             panic!("Invalid block statement")
           }
-          let mut block_env = Environment::new();
+          let mut block_env = Environment::new(Some(&env));
           self.eval_block(expressions, &mut block_env)
         }
     }
@@ -431,6 +431,44 @@ mod tests {
         &mut eva.global.clone()
       ),
       Some(Value::Int(230))
+    )
+  }
+
+  #[test]
+  fn nested_blocks() {
+    let mut eva = Eva::new();
+
+    let expr1 = Expr::VariableDeclaration("var".to_string(), "x".to_string(), Box::new(Expr::Literal(Value::Int(10))));
+    let block_lvl_2 = Expr::BlockStatement("begin".to_string(), vec![
+      Expr::VariableDeclaration("var".to_string(), "x".to_string(), Box::new(Expr::Literal(Value::Int(20)))),
+      Expr::Identifier("x".to_string()),
+    ]);
+    let expr2 = Expr::Identifier("x".to_string());
+
+    assert_eq!(
+      eva.eval(
+        Expr::BlockStatement("begin".to_string(), vec![expr1, block_lvl_2, expr2]),
+        &mut eva.global.clone(),
+      ),
+      Some(Value::Int(10)),
+    );
+  }
+
+  #[test]
+  fn outer_scope_reference() {
+    let mut eva = Eva::new();
+
+    let expr1 = Expr::VariableDeclaration("var".to_string(), "x".to_string(), Box::new(Expr::Literal(Value::Int(10))));
+    let expr2 = Expr::VariableDeclaration("var".to_string(), "y".to_string(), Box::new(
+      Expr::BlockStatement("begin".to_string(), vec![
+        Expr::Identifier("x".to_string())
+      ]),
+    ));
+    let expr3 = Expr::Identifier("y".to_string());
+
+    assert_eq!(
+      eva.eval(Expr::BlockStatement("begin".to_string(), vec![expr1, expr2, expr3]), &mut eva.global.clone()),
+      Some(Value::Int(10))
     )
   }
 }
