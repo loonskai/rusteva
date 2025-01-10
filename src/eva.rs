@@ -18,14 +18,16 @@ pub enum Expr {
   BinaryExpression(char, Box<Expr>, Box<Expr>),
   VariableDeclaration(String, String, Box<Expr>),
   Identifier(String),
-  BlockStatement(String, Vec<Expr>)
+  BlockStatement(String, Vec<Expr>),
+  Assignment(String, String, Box<Expr>),
 }
 
-pub struct Eva<'a> {
-  pub global: Environment<'a>
+#[derive(Debug)]
+pub struct Eva {
+  pub global: Environment
 }
 
-impl<'a> Eva<'a> {
+impl Eva {
   // Create global environment
   // Predefine values: null, true, false
   pub fn new() -> Self {
@@ -85,7 +87,7 @@ impl<'a> Eva<'a> {
         }
         Expr::Identifier(id) => {
           // TODO: Check for reserved words
-          match env.lookup(&id) {
+          match env.lookup(id) {
             Ok(value) => Some(value.clone()),
             Err(err) => panic!("{:?}", err)
           }
@@ -94,8 +96,27 @@ impl<'a> Eva<'a> {
           if keyword != "begin" {
             panic!("Invalid block statement")
           }
-          let mut block_env = Environment::new(Some(&env));
+          let mut block_env = Environment::new(Some(env.clone())); // BROKEN - we must not clone the parent env
           self.eval_block(expressions, &mut block_env)
+        },
+        Expr::Assignment(keyword, id, expr) => {
+          if keyword != "set" {
+            panic!("Invalid assignment")
+          }
+          match self.eval(*expr, env) {
+              Some(value) => {
+                match env.set(id, value) {
+                  Ok(result) => Some(result),
+                  Err(err) => panic!("{:?}", err)
+                }
+              },
+              None => {
+                match env.set(id, Value::Null) {
+                  Ok(result) => Some(result),
+                  Err(err) => panic!("{:?}", err)
+                }
+              }
+          }
         }
     }
   }
@@ -130,23 +151,23 @@ mod tests {
 
   #[test]
   fn default_globals() {
-    let eva = Eva::new();
+    let mut eva = Eva::new();
 
     assert!(
       matches!(
-        eva.global.lookup(&"null".to_string()),
+        eva.global.lookup("null".to_string()),
         Ok(Value::Null)
       )
     );
     assert!(
       matches!(
-        eva.global.lookup(&"true".to_string()),
+        eva.global.lookup("true".to_string()),
         Ok(Value::Boolean(true))
       )
     );
     assert!(
       matches!(
-        eva.global.lookup(&"false".to_string()),
+        eva.global.lookup("false".to_string()),
         Ok(Value::Boolean(false))
       )
     );
@@ -384,7 +405,7 @@ mod tests {
     );
     assert!(
       matches!(
-        env.lookup(&"x".to_string()),
+        env.lookup("x".to_string()),
         Ok(Value::Int(10))
       )
     );
@@ -404,7 +425,7 @@ mod tests {
     );
     assert!(
       matches!(
-        env.lookup(&"z".to_string()),
+        env.lookup("z".to_string()),
         Ok(Value::Int(6))
       )
     );
@@ -470,5 +491,59 @@ mod tests {
       eva.eval(Expr::BlockStatement("begin".to_string(), vec![expr1, expr2, expr3]), &mut eva.global.clone()),
       Some(Value::Int(10))
     )
+  }
+
+  #[test]
+  fn scope_chain_traversal() {
+    let mut eva = Eva::new();
+
+    let inner_decl = Expr::VariableDeclaration("var".to_string(), "x".to_string(), Box::new(
+      Expr::BinaryExpression(
+        '+', 
+        Box::new(Expr::Identifier("value".to_string())), 
+        Box::new(Expr::Literal(Value::Int(10)))
+      )
+    ));
+    let nested_block = Expr::BlockStatement("begin".to_string(), vec![
+      inner_decl,
+      Expr::Identifier("x".to_string())
+    ]);
+    let decl_2 = Expr::VariableDeclaration("var".to_string(), "result".to_string(), Box::new(nested_block));
+    let decl_1 = Expr::VariableDeclaration("var".to_string(), "value".to_string(), Box::new(Expr::Literal(Value::Int(10))));
+    let outer_block = Expr::BlockStatement("begin".to_string(), vec![
+      decl_1, 
+      decl_2,
+      Expr::Identifier("result".to_string())
+    ]);
+
+    assert_eq!(
+      eva.eval(outer_block, &mut eva.global.clone()),
+      Some(Value::Int(20)),
+    )
+  }
+
+  #[test]
+  fn same_scope_assignment() {
+    let mut eva = Eva::new();
+    
+    let decl_1 = Expr::VariableDeclaration("var".to_string(), "data".to_string(), Box::new(Expr::Literal(Value::Int(10))));
+    let assignment_1 = Expr::Assignment("set".to_string(), "data".to_string(), Box::new(Expr::Literal(Value::Int(100))));
+    let id_reference = Expr::Identifier("data".to_string());
+    let outer_block = Expr::BlockStatement("begin".to_string(), vec![decl_1, assignment_1, id_reference]);
+    assert_eq!(eva.eval(outer_block, &mut eva.global.clone()), Some(Value::Int(100)));
+  }
+
+  #[test]
+  fn outer_scope_assignment() {
+    let mut eva = Eva::new();
+    
+    let outer_decl_1 = Expr::VariableDeclaration("var".to_string(), "data".to_string(), Box::new(Expr::Literal(Value::Int(10))));
+    let inner_block = Expr::BlockStatement(
+      "begin".to_string(), 
+      vec![Expr::Assignment("set".to_string(), "data".to_string(), Box::new(Expr::Literal(Value::Int(100))))]
+    );
+    let id_reference = Expr::Identifier("data".to_string());
+    let outer_block = Expr::BlockStatement("begin".to_string(), vec![outer_decl_1, inner_block, id_reference]);
+    assert_eq!(eva.eval(outer_block, &mut eva.global.clone()), Some(Value::Int(100)));
   }
 }

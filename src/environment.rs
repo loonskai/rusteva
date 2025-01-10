@@ -2,20 +2,23 @@ use std::collections::HashMap;
 use crate::error::RuntimeError;
 use crate::eva::Value;
 
-#[derive(Clone, Default)]
-pub struct Environment<'a> {
+#[derive(Clone, Debug, Default)]
+pub struct Environment {
   record: HashMap<String, Value>,
-  parent: Option<&'a Environment<'a>>
+  parent: Option<Box<Environment>>
 }
 
-impl<'a> Environment<'a> {
-  pub fn new(parent: Option<&'a Environment<'a>>) -> Self {
-    Environment { record: HashMap::new(), parent }
+impl Environment {
+  pub fn new(parent: Option<Environment>) -> Self {
+    Environment { 
+      record: HashMap::new(),
+      parent: parent.map(|p| Box::new(p)) 
+    }
   }
 
   // (var x 10)
   pub fn define(&mut self, id: String, value: Value) -> Result<&Value, RuntimeError> {
-    // validate id name
+    // validate id name starts with a-z
     if !id.starts_with(|c| -> bool {
       let code = u32::from(c);
       println!("{}", code);
@@ -30,30 +33,38 @@ impl<'a> Environment<'a> {
   }
 
   // x
-  pub fn lookup(&self, id: &String) -> Result<&Value, RuntimeError> {
-    let mut current_env = self;
-    match current_env.record.get(id) {
-      Some(value) => Ok(value),
-      None => {
-        while current_env.parent.is_some() {
-          current_env = current_env.parent.unwrap();
-          return current_env.lookup(id);
+  pub fn lookup(&mut self, id: String) -> Result<&Value, RuntimeError> {
+    match self.resolve_env_mut(&id) {
+      Some(env) => {
+        match env.record.get(&id.clone()) {
+          Some(value) => Ok(value),
+          None => Err(RuntimeError::reference_error(&id))
         }
-        Err(RuntimeError::reference_error(id))
       }
+      None => Err(RuntimeError::reference_error(&id))
     }
   }
 
   // (set x 20)
   pub fn set(&mut self, id: String, value: Value) -> Result<Value, RuntimeError> {
-    match self.lookup(&id) {
-      Ok(_) => {
-        match self.record.insert(id.clone(), value) {
+    match self.resolve_env_mut(&id) {
+      Some(env) => {
+        match env.record.insert(id.clone(), value) {
           Some(inserted_value) => Ok(inserted_value),
-          None => panic!("Cannot set identificator \"{}\".", id)
+          None => panic!("Cannot set identificator \"{}\".", id.clone())
         }
       },
-      Err(err) => Err(err),
+      None =>Err(RuntimeError::reference_error(&id))
+    }
+  }
+
+  fn resolve_env_mut(&mut self, id: &String) -> Option<&mut Environment> {
+    if self.record.contains_key(id) {
+      Some(self)
+    } else if let Some(parent_env) = &mut self.parent {
+      parent_env.resolve_env_mut(id)
+    } else {
+      None
     }
   }
 }
@@ -76,7 +87,7 @@ mod tests {
       let x = env.define("x".to_string(), Value::Int(10));
       assert!(matches!(x, Err(RuntimeErrorKind)));
 
-      let x = env.lookup(&"x".to_string());
+      let x = env.lookup("x".to_string());
       assert!(matches!(x, Ok(Value::Int(10))));
     }
 
@@ -85,7 +96,7 @@ mod tests {
       let mut env = Environment::new(None);
       let _ = env.define("x".to_string(), Value::Int(10));
       let _ = env.set("x".to_string(), Value::Int(20));
-      let x = env.lookup(&"x".to_string()).expect("Cannot get value x");
+      let x = env.lookup("x".to_string()).expect("Cannot get value x");
       assert!(matches!(x, Value::Int(20)));
     }
 }
