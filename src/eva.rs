@@ -1,8 +1,6 @@
-use std::fmt::Debug;
+use std::{cell::RefCell, fmt::Debug, rc::Rc};
 use unicode_segmentation::{self, UnicodeSegmentation};
-
 use crate::environment::Environment;
-
 
 #[derive(Debug,PartialEq,Clone)]
 pub enum Value {
@@ -24,7 +22,7 @@ pub enum Expr {
 
 #[derive(Debug)]
 pub struct Eva {
-  pub global: Environment
+  pub global: Rc<RefCell<Environment>>
 }
 
 impl Eva {
@@ -32,15 +30,16 @@ impl Eva {
   // Predefine values: null, true, false
   pub fn new() -> Self {
     let mut global_env = Environment::new(None);
-    let _ = global_env.define("null".to_string(), Value::Null);
-    let _ = global_env.define("true".to_string(), Value::Boolean(true));
-    let _ = global_env.define("false".to_string(), Value::Boolean(false)); 
+    let _ = global_env.define(&"null".to_string(), Value::Null);
+    let _ = global_env.define(&"true".to_string(), Value::Boolean(true));
+    let _ = global_env.define(&"false".to_string(), Value::Boolean(false)); 
     Eva {
-      global: global_env,
+      global: Rc::new(RefCell::new(global_env)),
     }
   }
 
-  pub fn eval(&mut self, exp: Expr, env: &mut Environment) -> Option<Value> {
+  pub fn eval(&mut self, exp: Expr, current_env: Option<Rc<RefCell<Environment>>>) -> Option<Value> {
+    let env = current_env.map_or(Rc::clone(&self.global), |e| e);
     match exp {
         Expr::Literal(value) => {
           match value {
@@ -57,37 +56,42 @@ impl Eva {
           }
         }
         Expr::BinaryExpression(operator, exp1,exp2 ) => {
-          match operator {
-            '+' => self.binary_operation(env, exp1, exp2, |n1, n2| n1 + n2),
-            '-' => self.binary_operation(env, exp1, exp2, |n1, n2| n1 - n2),
-            '*' => self.binary_operation(env, exp1, exp2, |n1, n2| n1 * n2),
-            '/' => self.binary_operation(env, exp1, exp2, |n1, n2| {
-              if n2 == 0 {
-                panic!("Attempt to divide by zero.")
-              }
-              n1 / n2
-            }),
+          let v1 = self.eval(*exp1, Some(Rc::clone(&env))).expect("Invalid operand");
+          let v2 = self.eval(*exp2, Some(Rc::clone(&env))).expect("Invalid operand");
+          match (v1, v2) {
+            (Value::Int(n1), Value::Int(n2)) => {
+              let result = match operator {
+                '+' => n1 + n2,
+                '-' => n1 - n2,
+                '*' => n1 * n2,
+                '/' => {
+                  if n2 == 0 {
+                    panic!("Attempt to divide by zero.")
+                  }
+                  n1 / n2
+                },
+                _ => panic!("Invalid operator")
+              };
+              Some(Value::Int(result))
+            },
             _ => None
           }
+          
         }
         Expr::VariableDeclaration(var_keyword, id_name, exp) => {
           if var_keyword != "var".to_string() {
             panic!("Unknown keyword: {}", var_keyword);
           }
-          let result = match self.eval(*exp, env) {
-            Some(value) => {
-              env.define(id_name, value)
-            },
-            None => panic!("Unable to declare variable")
-          };
-          match result {
-              Ok(value) => Some(value.clone()),
-              Err(err) => panic!("{:?}", err),
+          if let Some(value) = self.eval(*exp, Some(Rc::clone(&env))) {
+            if let Ok(result) = env.borrow_mut().define(&id_name, value) {
+              return Some(result.clone())
+            }
           }
+          panic!("Unable to declare variable")
         }
         Expr::Identifier(id) => {
           // TODO: Check for reserved words
-          match env.lookup(id) {
+          match env.borrow().lookup(&id) {
             Ok(value) => Some(value.clone()),
             Err(err) => panic!("{:?}", err)
           }
@@ -96,49 +100,24 @@ impl Eva {
           if keyword != "begin" {
             panic!("Invalid block statement")
           }
-          let mut block_env = Environment::new(Some(env.clone())); // BROKEN - we must not clone the parent env
-          self.eval_block(expressions, &mut block_env)
+          let block_env = Environment::new(Some(env)); // BROKEN - we must not clone the parent env
+          self.eval_block(expressions, Rc::new(RefCell::new(block_env)))
         },
         Expr::Assignment(keyword, id, expr) => {
           if keyword != "set" {
             panic!("Invalid assignment")
           }
-          match self.eval(*expr, env) {
-              Some(value) => {
-                match env.set(id, value) {
-                  Ok(result) => Some(result),
-                  Err(err) => panic!("{:?}", err)
-                }
-              },
-              None => {
-                match env.set(id, Value::Null) {
-                  Ok(result) => Some(result),
-                  Err(err) => panic!("{:?}", err)
-                }
-              }
-          }
+          let result = self.eval(*expr, Some(Rc::clone(&env))).map_or(Value::Null, |value| value);
+          let _ = env.borrow_mut().set(&id, result.clone());
+          Some(result)
         }
     }
   }
 
-  fn binary_operation<F>(&mut self, env: &mut Environment, exp1: Box<Expr>, exp2: Box<Expr>, operation: F) -> Option<Value> 
-  where
-    F: Fn(isize, isize) -> isize
-  {
-    let v1 = self.eval(*exp1, env).expect("Invalid operand.");
-    let v2 = self.eval(*exp2, env).expect("Invalid operand.");
-    match (v1, v2) {
-      (Value::Int(n1), Value::Int(n2)) => {
-        Some(Value::Int(operation(n1, n2)))
-      },
-      _ => None
-    }
-  }
-
-  fn eval_block(&mut self, expressions: Vec<Expr>, env: &mut Environment) -> Option<Value> {
+  fn eval_block(&mut self, expressions: Vec<Expr>, env: Rc<RefCell<Environment>>) -> Option<Value> {
     let mut result = None;
     for exp in expressions {
-      result = self.eval(exp, env);
+      result = self.eval(exp, Some(Rc::clone(&env)));
     }
     result
   }
@@ -151,23 +130,23 @@ mod tests {
 
   #[test]
   fn default_globals() {
-    let mut eva = Eva::new();
+    let eva = Eva::new();
 
     assert!(
       matches!(
-        eva.global.lookup("null".to_string()),
+        eva.global.borrow().lookup(&"null".to_string()),
         Ok(Value::Null)
       )
     );
     assert!(
       matches!(
-        eva.global.lookup("true".to_string()),
+        eva.global.borrow().lookup(&"true".to_string()),
         Ok(Value::Boolean(true))
       )
     );
     assert!(
       matches!(
-        eva.global.lookup("false".to_string()),
+        eva.global.borrow().lookup(&"false".to_string()),
         Ok(Value::Boolean(false))
       )
     );
@@ -178,32 +157,31 @@ mod tests {
     let mut eva = Eva::new();
 
     assert_eq!(
-      eva.eval(Expr::Literal(Value::Null), &mut eva.global.clone()), 
+      eva.eval(Expr::Literal(Value::Null), None), 
       None
     );
     assert_eq!(
-      eva.eval(Expr::Literal(Value::Boolean(true)), &mut eva.global.clone()), 
+      Eva::new().eval(Expr::Literal(Value::Boolean(true)), None), 
       Some(Value::Boolean(true))
     );
     assert_eq!(
-      eva.eval(Expr::Literal(Value::Boolean(false)), &mut eva.global.clone()), 
+      eva.eval(Expr::Literal(Value::Boolean(false)), None), 
       Some(Value::Boolean(false))
     );
     assert_eq!(
-      eva.eval(Expr::Literal(Value::Int(1)), &mut eva.global.clone()), 
+      eva.eval(Expr::Literal(Value::Int(1)), None), 
       Some(Value::Int(1))
     );
     assert_eq!(
-      eva.eval(Expr::Literal(Value::Int(-10)), &mut eva.global.clone()), 
+      eva.eval(Expr::Literal(Value::Int(-10)), None), 
       Some(Value::Int(-10))
     );
     assert_eq!(
-      eva.eval(Expr::Literal(Value::Str(r#""hello""#.to_string())), &mut eva.global.clone()), 
+      eva.eval(Expr::Literal(Value::Str(r#""hello""#.to_string())), None), 
       Some(Value::Str("hello".to_string()))
     );
     assert_eq!(
-      eva.eval(Expr::Literal(Value::Str(r#""🎅 新年快乐!""#.to_string())), 
-      &mut eva.global.clone()), 
+      eva.eval(Expr::Literal(Value::Str(r#""🎅 新年快乐!""#.to_string())), None), 
       Some(Value::Str("🎅 新年快乐!".to_string()))
     );
   }
@@ -219,7 +197,7 @@ mod tests {
           Box::new(Expr::Literal(Value::Int(3))), 
           Box::new(Expr::Literal(Value::Int(2)))
         ), 
-        &mut eva.global.clone()
+        None
       ), 
       Some(Value::Int(5))
     );
@@ -230,7 +208,7 @@ mod tests {
           Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
           Box::new(Expr::Literal(Value::Int(3))),
         ),
-        &mut eva.global.clone()
+        None
       ), 
       Some(Value::Int(8))
     );
@@ -241,7 +219,7 @@ mod tests {
           Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
           Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
         ),
-        &mut eva.global.clone()
+        None
       ), 
       Some(Value::Int(10))
     );
@@ -258,7 +236,7 @@ mod tests {
           Box::new(Expr::Literal(Value::Int(3))), 
           Box::new(Expr::Literal(Value::Int(2)))
         ), 
-        &mut eva.global.clone()
+        None
       ), 
       Some(Value::Int(1))
     );
@@ -269,7 +247,7 @@ mod tests {
           Box::new(Expr::BinaryExpression('-', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
           Box::new(Expr::Literal(Value::Int(3))),
         ), 
-        &mut eva.global.clone()
+        None
       ), 
       Some(Value::Int(-2))
     );
@@ -280,7 +258,7 @@ mod tests {
           Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
           Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
         ),
-        &mut eva.global.clone()
+        None
       ), 
       Some(Value::Int(0))
     );
@@ -297,7 +275,7 @@ mod tests {
           Box::new(Expr::Literal(Value::Int(3))), 
           Box::new(Expr::Literal(Value::Int(2)))
         ),
-        &mut eva.global.clone()
+        None
       ), 
       Some(Value::Int(6))
     );
@@ -312,7 +290,7 @@ mod tests {
           ), 
           Box::new(Expr::Literal(Value::Int(3))),
         ),
-        &mut eva.global.clone()
+        None
       ), 
       Some(Value::Int(18))
     );
@@ -323,7 +301,7 @@ mod tests {
           Box::new(Expr::BinaryExpression('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
           Box::new(Expr::BinaryExpression('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
         ),
-        &mut eva.global.clone()
+        None
       ), 
       Some(Value::Int(36))
     );
@@ -340,7 +318,7 @@ mod tests {
           Box::new(Expr::Literal(Value::Int(25))), 
           Box::new(Expr::Literal(Value::Int(5)))
         ),
-        &mut eva.global.clone()
+        None
       ), 
       Some(Value::Int(5))
     );
@@ -351,7 +329,7 @@ mod tests {
           Box::new(Expr::BinaryExpression('/', Box::new(Expr::Literal(Value::Int(25))), Box::new(Expr::Literal(Value::Int(5))))), 
           Box::new(Expr::Literal(Value::Int(5))),
         ),
-        &mut eva.global.clone()
+        None
       ), 
       Some(Value::Int(1))
     );
@@ -362,7 +340,7 @@ mod tests {
           Box::new(Expr::Literal(Value::Int(0))),
           Box::new(Expr::Literal(Value::Int(3))), 
         ),
-        &mut eva.global.clone()
+        None
       ), 
       Some(Value::Int(0))
     );
@@ -381,7 +359,7 @@ mod tests {
           Box::new(Expr::Literal(Value::Int(3))),
           Box::new(Expr::Literal(Value::Int(0))), 
         ),
-        &mut eva.global.clone()
+        None
       ), 
       Some(Value::Int(0))
     );
@@ -390,7 +368,6 @@ mod tests {
   #[test]
   fn variable_declaration() {
     let mut eva = Eva::new();
-    let mut env = std::mem::take(&mut eva.global); 
 
     assert_eq!(
       eva.eval(
@@ -399,13 +376,13 @@ mod tests {
           "x".to_string(), 
          Box::new(Expr::Literal(Value::Int(10)))
         ),
-        &mut env,
+        None,
       ), 
       Some(Value::Int(10))
     );
     assert!(
       matches!(
-        env.lookup("x".to_string()),
+        eva.global.borrow().lookup(&"x".to_string()),
         Ok(Value::Int(10))
       )
     );
@@ -421,11 +398,11 @@ mod tests {
             Box::new(Expr::Literal(Value::Int(4))),
         ),
       )),
-      &mut env
+      None,
     );
     assert!(
       matches!(
-        env.lookup("z".to_string()),
+        eva.global.borrow().lookup(&"z".to_string()),
         Ok(Value::Int(6))
       )
     );
@@ -434,6 +411,7 @@ mod tests {
   #[test]
   fn block_statement() {
     let mut eva = Eva::new();
+
     let expr1 =  Expr::VariableDeclaration("var".to_string(), "x".to_string(), Box::new(Expr::Literal(Value::Int(10))));
     let expr2 = Expr::VariableDeclaration("var".to_string(), "y".to_string(), Box::new(Expr::Literal(Value::Int(20))));
     let expr3 = Expr::BinaryExpression(
@@ -449,7 +427,7 @@ mod tests {
     assert_eq!(
       eva.eval(
         Expr::BlockStatement("begin".to_string(), vec![expr1, expr2, expr3]), 
-        &mut eva.global.clone()
+        None
       ),
       Some(Value::Int(230))
     )
@@ -469,7 +447,7 @@ mod tests {
     assert_eq!(
       eva.eval(
         Expr::BlockStatement("begin".to_string(), vec![expr1, block_lvl_2, expr2]),
-        &mut eva.global.clone(),
+        None,
       ),
       Some(Value::Int(10)),
     );
@@ -488,7 +466,7 @@ mod tests {
     let expr3 = Expr::Identifier("y".to_string());
 
     assert_eq!(
-      eva.eval(Expr::BlockStatement("begin".to_string(), vec![expr1, expr2, expr3]), &mut eva.global.clone()),
+      eva.eval(Expr::BlockStatement("begin".to_string(), vec![expr1, expr2, expr3]), None),
       Some(Value::Int(10))
     )
   }
@@ -517,7 +495,7 @@ mod tests {
     ]);
 
     assert_eq!(
-      eva.eval(outer_block, &mut eva.global.clone()),
+      eva.eval(outer_block, None),
       Some(Value::Int(20)),
     )
   }
@@ -526,11 +504,20 @@ mod tests {
   fn same_scope_assignment() {
     let mut eva = Eva::new();
     
-    let decl_1 = Expr::VariableDeclaration("var".to_string(), "data".to_string(), Box::new(Expr::Literal(Value::Int(10))));
-    let assignment_1 = Expr::Assignment("set".to_string(), "data".to_string(), Box::new(Expr::Literal(Value::Int(100))));
-    let id_reference = Expr::Identifier("data".to_string());
-    let outer_block = Expr::BlockStatement("begin".to_string(), vec![decl_1, assignment_1, id_reference]);
-    assert_eq!(eva.eval(outer_block, &mut eva.global.clone()), Some(Value::Int(100)));
+    assert_eq!(
+      eva.eval(
+        Expr::BlockStatement(
+          "begin".to_string(), 
+          vec![
+            Expr::VariableDeclaration("var".to_string(), "data".to_string(), Box::new(Expr::Literal(Value::Int(10)))), 
+            Expr::Assignment("set".to_string(), "data".to_string(), Box::new(Expr::Literal(Value::Int(100)))), 
+            Expr::Identifier("data".to_string())
+          ],
+        ), 
+        None
+      ), 
+      Some(Value::Int(100))
+    );
   }
 
   #[test]
@@ -544,6 +531,6 @@ mod tests {
     );
     let id_reference = Expr::Identifier("data".to_string());
     let outer_block = Expr::BlockStatement("begin".to_string(), vec![outer_decl_1, inner_block, id_reference]);
-    assert_eq!(eva.eval(outer_block, &mut eva.global.clone()), Some(Value::Int(100)));
+    assert_eq!(eva.eval(outer_block, None), Some(Value::Int(100)));
   }
 }
