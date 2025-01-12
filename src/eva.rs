@@ -13,11 +13,12 @@ pub enum Value {
 #[derive(Debug,PartialEq)]
 pub enum Expr {
   Literal(Value),
-  BinaryExpression(char, Box<Expr>, Box<Expr>),
+  BinaryExpression(String, Box<Expr>, Box<Expr>),
   VariableDeclaration(String, String, Box<Expr>),
   Identifier(String),
   BlockStatement(String, Vec<Expr>),
   Assignment(String, String, Box<Expr>),
+  IfExpression(String, Box<Expr>, Box<Expr>, Box<Expr>)
 }
 
 #[derive(Debug)]
@@ -60,23 +61,37 @@ impl Eva {
           let v2 = self.eval(*exp2, Some(Rc::clone(&env))).expect("Invalid operand");
           match (v1, v2) {
             (Value::Int(n1), Value::Int(n2)) => {
-              let result = match operator {
-                '+' => n1 + n2,
-                '-' => n1 - n2,
-                '*' => n1 * n2,
-                '/' => {
-                  if n2 == 0 {
-                    panic!("Attempt to divide by zero.")
-                  }
-                  n1 / n2
-                },
-                _ => panic!("Invalid operator")
-              };
-              Some(Value::Int(result))
-            },
-            _ => None
+              let operator_str = operator.as_str();
+              if matches!(operator_str, "+" | "-" | "*" | "/") {
+                let result = match operator_str {
+                  "+" => n1 + n2,
+                  "-" => n1 - n2,
+                  "*" => n1 * n2,
+                  "/" => {
+                    if n2 == 0 {
+                      panic!("Attempt to divide by zero.")
+                    }
+                    n1 / n2
+                  },
+                  _ => panic!("Unknown operator")
+                };
+                return Some(Value::Int(result));
+              } else if matches!(operator.as_str(), ">" | "<" | ">=" | "<=" | "==") {
+                let result = match operator.as_str() {
+                  ">" => n1 > n2,
+                  "<" => n1 < n2,
+                  ">=" => n1 >= n2,
+                  "<=" => n1 <= n2,
+                  "==" => n1 == n2,
+                  _ => panic!("Unknown operator")
+                };
+                return Some(Value::Boolean(result));
+              } else {
+                panic!("Invalid operator")
+              }
+            }
+            _ => None,
           }
-          
         }
         Expr::VariableDeclaration(var_keyword, id_name, exp) => {
           if var_keyword != "var".to_string() {
@@ -110,6 +125,25 @@ impl Eva {
           let result = self.eval(*expr, Some(Rc::clone(&env))).map_or(Value::Null, |value| value);
           let _ = env.borrow_mut().set(&id, result.clone());
           Some(result)
+        },
+        Expr::IfExpression(keyword, condition_expr, consequent_expr, alternate_exp) => {
+          if keyword != "if" {
+            panic!("Invalid assignment");
+          }
+          let result = self.eval(*condition_expr, Some(Rc::clone(&env)));
+          if let Some(cond) = result {
+            match cond {
+                Value::Boolean(value) => {
+                  if value {
+                    return self.eval(*consequent_expr, Some(Rc::clone(&env)));
+                  } else {
+                    return self.eval(*alternate_exp, Some(Rc::clone(&env)));
+                  }
+                },
+                _ => panic!("Condition expression must return boolean")
+            }
+          }
+          unimplemented!()
         }
     }
   }
@@ -193,7 +227,7 @@ mod tests {
     assert_eq!(
       eva.eval(
         Expr::BinaryExpression(
-          '+', 
+          "+".to_string(), 
           Box::new(Expr::Literal(Value::Int(3))), 
           Box::new(Expr::Literal(Value::Int(2)))
         ), 
@@ -204,8 +238,8 @@ mod tests {
     assert_eq!(
       eva.eval(
         Expr::BinaryExpression(
-          '+', 
-          Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+          "+".to_string(), 
+          Box::new(Expr::BinaryExpression("+".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
           Box::new(Expr::Literal(Value::Int(3))),
         ),
         None
@@ -215,9 +249,9 @@ mod tests {
     assert_eq!(
       eva.eval(
         Expr::BinaryExpression(
-          '+', 
-          Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-          Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
+          "+".to_string(), 
+          Box::new(Expr::BinaryExpression("+".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+          Box::new(Expr::BinaryExpression("+".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
         ),
         None
       ), 
@@ -232,7 +266,7 @@ mod tests {
     assert_eq!(
       eva.eval(
         Expr::BinaryExpression(
-          '-', 
+          "-".to_string(), 
           Box::new(Expr::Literal(Value::Int(3))), 
           Box::new(Expr::Literal(Value::Int(2)))
         ), 
@@ -243,8 +277,8 @@ mod tests {
     assert_eq!(
       eva.eval(
         Expr::BinaryExpression(
-          '-', 
-          Box::new(Expr::BinaryExpression('-', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+          "-".to_string(), 
+          Box::new(Expr::BinaryExpression("-".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
           Box::new(Expr::Literal(Value::Int(3))),
         ), 
         None
@@ -254,9 +288,9 @@ mod tests {
     assert_eq!(
       eva.eval(
         Expr::BinaryExpression(
-          '-', 
-          Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-          Box::new(Expr::BinaryExpression('+', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
+          "-".to_string(), 
+          Box::new(Expr::BinaryExpression("+".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+          Box::new(Expr::BinaryExpression("+".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
         ),
         None
       ), 
@@ -271,7 +305,7 @@ mod tests {
     assert_eq!(
       eva.eval(
         Expr::BinaryExpression(
-          '*', 
+          "*".to_string(), 
           Box::new(Expr::Literal(Value::Int(3))), 
           Box::new(Expr::Literal(Value::Int(2)))
         ),
@@ -282,9 +316,9 @@ mod tests {
     assert_eq!(
       eva.eval(
         Expr::BinaryExpression(
-          '*', 
+          "*".to_string(), 
           Box::new(Expr::BinaryExpression(
-            '*', 
+            "*".to_string(), 
             Box::new(Expr::Literal(Value::Int(3))), 
             Box::new(Expr::Literal(Value::Int(2))))
           ), 
@@ -297,9 +331,9 @@ mod tests {
     assert_eq!(
       eva.eval(
         Expr::BinaryExpression(
-          '*', 
-          Box::new(Expr::BinaryExpression('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-          Box::new(Expr::BinaryExpression('*', Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
+          "*".to_string(), 
+          Box::new(Expr::BinaryExpression("*".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
+          Box::new(Expr::BinaryExpression("*".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
         ),
         None
       ), 
@@ -314,7 +348,7 @@ mod tests {
     assert_eq!(
       eva.eval(
         Expr::BinaryExpression(
-          '/', 
+          "/".to_string(), 
           Box::new(Expr::Literal(Value::Int(25))), 
           Box::new(Expr::Literal(Value::Int(5)))
         ),
@@ -325,8 +359,8 @@ mod tests {
     assert_eq!(
       eva.eval(
         Expr::BinaryExpression(
-          '/', 
-          Box::new(Expr::BinaryExpression('/', Box::new(Expr::Literal(Value::Int(25))), Box::new(Expr::Literal(Value::Int(5))))), 
+          "/".to_string(), 
+          Box::new(Expr::BinaryExpression("/".to_string(), Box::new(Expr::Literal(Value::Int(25))), Box::new(Expr::Literal(Value::Int(5))))), 
           Box::new(Expr::Literal(Value::Int(5))),
         ),
         None
@@ -336,7 +370,7 @@ mod tests {
     assert_eq!(
       eva.eval(
         Expr::BinaryExpression(
-          '/', 
+          "/".to_string(), 
           Box::new(Expr::Literal(Value::Int(0))),
           Box::new(Expr::Literal(Value::Int(3))), 
         ),
@@ -355,7 +389,7 @@ mod tests {
     assert_eq!(
       eva.eval(
         Expr::BinaryExpression(
-          '/', 
+          "/".to_string(), 
           Box::new(Expr::Literal(Value::Int(3))),
           Box::new(Expr::Literal(Value::Int(0))), 
         ),
@@ -393,7 +427,7 @@ mod tests {
         "z".to_string(),
         Box::new(
           Expr::BinaryExpression(
-            '+',
+            "+".to_string(),
             Box::new(Expr::Literal(Value::Int(2))),
             Box::new(Expr::Literal(Value::Int(4))),
         ),
@@ -415,9 +449,9 @@ mod tests {
     let expr1 =  Expr::VariableDeclaration("var".to_string(), "x".to_string(), Box::new(Expr::Literal(Value::Int(10))));
     let expr2 = Expr::VariableDeclaration("var".to_string(), "y".to_string(), Box::new(Expr::Literal(Value::Int(20))));
     let expr3 = Expr::BinaryExpression(
-      '+',
+      "+".to_string(),
       Box::new(Expr::BinaryExpression(
-        '*', 
+        "*".to_string(), 
         Box::new(Expr::Identifier("x".to_string())),
         Box::new(Expr::Identifier("y".to_string())))
       ),
@@ -477,7 +511,7 @@ mod tests {
 
     let inner_decl = Expr::VariableDeclaration("var".to_string(), "x".to_string(), Box::new(
       Expr::BinaryExpression(
-        '+', 
+        "+".to_string(), 
         Box::new(Expr::Identifier("value".to_string())), 
         Box::new(Expr::Literal(Value::Int(10)))
       )
@@ -532,5 +566,48 @@ mod tests {
     let id_reference = Expr::Identifier("data".to_string());
     let outer_block = Expr::BlockStatement("begin".to_string(), vec![outer_decl_1, inner_block, id_reference]);
     assert_eq!(eva.eval(outer_block, None), Some(Value::Int(100)));
+  }
+
+  #[test]
+  fn if_expression() {
+    let mut eva = Eva::new();
+
+    assert_eq!(
+      eva.eval(
+        Expr::BlockStatement(
+          "begin".to_string(),
+          vec![
+            Expr::VariableDeclaration("var".to_string(), "x".to_string(), Box::new(Expr::Literal(Value::Int(10)))),
+            Expr::VariableDeclaration("var".to_string(), "y".to_string(), Box::new(Expr::Literal(Value::Int(0)))),
+            Expr::IfExpression(
+              "if".to_string(), 
+              Box::new(
+                Expr::BinaryExpression(
+                  ">".to_string(), 
+                  Box::new(Expr::Identifier("x".to_string())),
+                  Box::new(Expr::Literal(Value::Int(10)))
+                ),
+              ),
+              Box::new(
+                Expr::Assignment(
+                  "set".to_string(), 
+                  "y".to_string(), 
+                  Box::new(Expr::Literal(Value::Int(20)))
+                ),
+              ),
+              Box::new(
+                Expr::Assignment(
+                  "set".to_string(), 
+                  "y".to_string(), 
+                  Box::new(Expr::Literal(Value::Int(30)))
+                ),
+              ), 
+            )
+          ]
+        ),
+        None
+      ),
+      Some(Value::Int(30))
+    )
   }
 }
