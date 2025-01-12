@@ -10,7 +10,7 @@ pub enum Value {
   Boolean(bool)
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Clone)]
 pub enum Expr {
   Literal(Value),
   BinaryExpression(String, Box<Expr>, Box<Expr>),
@@ -18,7 +18,8 @@ pub enum Expr {
   Identifier(String),
   BlockStatement(String, Vec<Expr>),
   Assignment(String, String, Box<Expr>),
-  IfExpression(String, Box<Expr>, Box<Expr>, Box<Expr>)
+  IfExpression(String, Box<Expr>, Box<Expr>, Box<Expr>),
+  WhileStatement(String, Box<Expr>, Box<Expr>)
 }
 
 #[derive(Debug)]
@@ -143,7 +144,27 @@ impl Eva {
                 _ => panic!("Condition expression must return boolean")
             }
           }
-          unimplemented!()
+          None
+        },
+        Expr::WhileStatement(keyword, condition_expr, consequent_expr) => {
+          if keyword != "while" {
+            panic!("Invalid while statement");
+          }
+          let condition = *condition_expr;
+          let consequent = *consequent_expr;
+          let mut condition_result = self.eval(condition.clone(), Some(Rc::clone(&env))); // 1
+          let mut consequent_result = None;
+          while let Some(true) = condition_result.as_ref().map(|v| {
+            match v {
+                Value::Boolean(bool_result) => bool_result,
+                _ => panic!("While condition must return boolean")
+            }
+          }) {
+            // Q: Why the order of both evals matters?
+            consequent_result = self.eval(consequent.clone(), Some(Rc::clone(&env)));
+            condition_result = self.eval(condition.clone(), Some(Rc::clone(&env)));
+          }
+          return consequent_result;
         }
     }
   }
@@ -608,6 +629,65 @@ mod tests {
         None
       ),
       Some(Value::Int(30))
+    )
+  }
+
+  #[test]
+  fn while_statement() {
+    let mut eva = Eva::new();
+
+    assert_eq!(
+      eva.eval(
+        Expr::BlockStatement(
+          "begin".to_string(),
+          vec![
+            Expr::VariableDeclaration(
+              "var".to_string(),
+              "counter".to_string(),
+              Box::new(Expr::Literal(Value::Int(0)))
+            ),
+            Expr::VariableDeclaration(
+              "var".to_string(),
+              "result".to_string(),
+              Box::new(Expr::Literal(Value::Int(0)))
+            ),
+            Expr::WhileStatement(
+              "while".to_string(),
+              Box::new(Expr::BinaryExpression(
+                "<".to_string(),
+                Box::new(Expr::Identifier("counter".to_string())),
+                Box::new(Expr::Literal(Value::Int(10))),
+              )),
+              Box::new(Expr::BlockStatement(
+                "begin".to_string(),
+                vec![
+                  Expr::Assignment(
+                    "set".to_string(), 
+                    "result".to_string(),
+                    Box::new(Expr::BinaryExpression(
+                      "+".to_string(), 
+                      Box::new(Expr::Identifier("result".to_string())), 
+                      Box::new(Expr::Literal(Value::Int(1))))
+                    ), 
+                  ),
+                  Expr::Assignment(
+                    "set".to_string(), 
+                    "counter".to_string(),
+                    Box::new(Expr::BinaryExpression(
+                      "+".to_string(), 
+                      Box::new(Expr::Identifier("counter".to_string())), 
+                      Box::new(Expr::Literal(Value::Int(1))))
+                    ), 
+                  )
+                ]
+              ))
+            ),
+            Expr::Identifier("result".to_string())
+          ]
+        ), 
+        None
+      ),
+      Some(Value::Int(10))
     )
   }
 }
