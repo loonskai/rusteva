@@ -1,0 +1,72 @@
+// ----------------------------------------
+// Lexical grammar (tokens)
+
+%lex
+
+%%
+
+\s+                /* skip whitespace */
+\(                 return "LPAREN"
+\)                 return "RPAREN"
+\"[^\"]*\"         return "STRING"
+[\-]?\d+           return "NUMBER"
+'true'|'false'     return "BOOLEAN"
+'null'             return "NULL"
+'begin'            return "BEGIN"
+'var'              return "VAR"
+'if'               return "IF"
+'while'            return "WHILE"
+'='                return "ASSIGN"
+[+\-*/=<>]+        return "OPERATOR"
+[\w]+              return "IDENTIFIER"
+
+/lex
+
+// ----------------------------------------
+// Syntactic grammar (BNF)
+
+%{
+
+#[derive(Debug,PartialEq,Clone)]
+pub enum Expr {
+  Literal(Value),
+  BinaryExpression(String, Box<Expr>, Box<Expr>),
+  VariableDeclaration(String, Box<Expr>),
+  Identifier(String),
+  BlockStatement(Vec<Expr>),
+  Assignment(String, Box<Expr>),
+  IfExpression(Box<Expr>, Box<Expr>, Box<Expr>),
+  WhileStatement(Box<Expr>, Box<Expr>)
+}
+
+
+#[derive(Debug,PartialEq,Clone)]
+pub enum Value {
+  Int(isize),
+  Str(String),
+  Null,
+  Boolean(bool)
+}
+
+type TResult = Value;
+
+%}
+
+// Type declarations
+%type<Value> Literal
+
+%%
+
+Expression
+    : Literal
+    | List
+    ;
+
+Literal
+    : NUMBER    {
+        || -> Value;
+        $$ = Value::Int(yytext.parse::<isize>().unwrap())
+    }
+    | STRING
+    | SYMBOL
+    ;
