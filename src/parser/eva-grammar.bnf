@@ -100,8 +100,9 @@ SExpr
     $$ = Expr::BlockStatement($3)
   }
   | '(' VAR IDENTIFIER Expression ')' {
-    |$3: String, $4: Expr| -> Expr;
-    $$ = Expr::VariableDeclaration($3, Box::new($4))
+    |$3: Token, $4: Expr| -> Expr;
+    let ident = $3.value.to_string();
+    $$ = Expr::VariableDeclaration(ident, Box::new($4))
   }
   | '(' IF Expression Expression Expression ')' {
     |$3: Expr, $4: Expr, $5: Expr| -> Expr;
@@ -116,8 +117,9 @@ SExpr
     $$ = Expr::Assignment($3, Box::new($4))
   }
   | '(' OPERATOR Expression Expression ')' {
-    |$3: String, $4: Expr, $5: Expr| -> Expr;
-    $$ = Expr::BinaryExpression($3, Box::new($4), Box::new($5))
+    |$2: Token, $3: Expr, $4: Expr| -> Expr;
+    let ident = $2.value.to_string();
+    $$ = Expr::BinaryExpression(ident, Box::new($3), Box::new($4))
   }
   ;
 

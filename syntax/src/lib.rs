@@ -908,11 +908,12 @@ fn _handler11(&mut self) -> SV {
 // Semantic values prologue.
 self.values_stack.pop();
 let mut _4 = pop!(self.values_stack, _2);
-let mut _3 = pop!(self.values_stack, _4);
+let mut _3 = pop!(self.values_stack, _0);
 self.values_stack.pop();
 self.values_stack.pop();
 
-let __ = Expr::VariableDeclaration(_3, Box::new(_4));
+let ident = _3.value.to_string();
+    let __ = Expr::VariableDeclaration(ident, Box::new(_4));
 SV::_2(__)
 }
 
@@ -955,13 +956,14 @@ SV::_2(__)
 
 fn _handler15(&mut self) -> SV {
 // Semantic values prologue.
-let mut _5 = pop!(self.values_stack, _2);
-let mut _4 = pop!(self.values_stack, _2);
-let mut _3 = pop!(self.values_stack, _4);
 self.values_stack.pop();
+let mut _4 = pop!(self.values_stack, _2);
+let mut _3 = pop!(self.values_stack, _2);
+let mut _2 = pop!(self.values_stack, _0);
 self.values_stack.pop();
 
-let __ = Expr::BinaryExpression(_3, Box::new(_4), Box::new(_5));
+let ident = _2.value.to_string();
+    let __ = Expr::BinaryExpression(ident, Box::new(_3), Box::new(_4));
 SV::_2(__)
 }
 }
