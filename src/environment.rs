@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
+use syntax::Value;
+
 use crate::error::RuntimeError;
-use crate::eva::Value;
 
 #[derive(Clone, Debug, Default)]
 pub struct Environment {
@@ -61,7 +62,7 @@ impl Environment {
 
 #[cfg(test)]
 mod tests {
-    use crate::eva::Value;
+    use syntax::Value;
 
     use super::Environment;
 

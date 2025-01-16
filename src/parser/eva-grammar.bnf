@@ -5,9 +5,7 @@
 
 %%
 
-\s+                /* skip whitespace */
-\(                 return "LPAREN"
-\)                 return "RPAREN"
+\s+                /* skip whitespace */ return "";
 \"[^\"]*\"         return "STRING"
 [\-]?\d+           return "NUMBER"
 'true'|'false'     return "BOOLEAN"
@@ -16,7 +14,7 @@
 'var'              return "VAR"
 'if'               return "IF"
 'while'            return "WHILE"
-'='                return "ASSIGN"
+'set'              return "ASSIGN"
 [+\-*/=<>]+        return "OPERATOR"
 [\w]+              return "IDENTIFIER"
 
@@ -39,7 +37,6 @@ pub enum Expr {
   WhileStatement(Box<Expr>, Box<Expr>)
 }
 
-
 #[derive(Debug,PartialEq,Clone)]
 pub enum Value {
   Int(isize),
@@ -48,25 +45,79 @@ pub enum Value {
   Boolean(bool)
 }
 
-type TResult = Value;
+type TResult = Expr;
 
 %}
-
-// Type declarations
-%type<Value> Literal
 
 %%
 
 Expression
-    : Literal
-    | List
+    : Literal { 
+      |$1: Value| -> Expr;
+      $$ = Expr::Literal($1) 
+    }
+    | IDENTIFIER {
+      || -> Expr;
+      $$ = Expr::Identifier(yytext.to_string())
+    }
+    | SExpr { $$ = $1 }
     ;
 
 Literal
-    : NUMBER    {
-        || -> Value;
-        $$ = Value::Int(yytext.parse::<isize>().unwrap())
+    : NUMBER {
+      || -> Value;
+      $$ = Value::Int(yytext.parse::<isize>().unwrap())
     }
-    | STRING
-    | SYMBOL
+    | STRING {
+      || -> Value;
+      $$ = Value::Str(yytext.to_string())
+    }
+    | BOOLEAN {
+      || -> Value;
+      $$ = Value::Boolean(yytext == "true")
+    }
+    | NULL {
+      || -> Value;
+      $$ = Value::Null
+    }
     ;
+
+ExpressionsList
+  : ExpressionsList Expression {
+    |$1: Vec<Expr>, $2: Expr | -> Vec<Expr>;
+    $1.push($2);
+    $$ = $1
+  }
+  | /* empty */ {
+    || -> Vec<Expr>; 
+    $$ = Vec::new() 
+  }
+  ;
+
+SExpr
+  : '(' BEGIN ExpressionsList ')' {
+    |$3: Vec<Expr>| -> Expr;
+    $$ = Expr::BlockStatement($3)
+  }
+  | '(' VAR IDENTIFIER Expression ')' {
+    |$3: String, $4: Expr| -> Expr;
+    $$ = Expr::VariableDeclaration($3, Box::new($4))
+  }
+  | '(' IF Expression Expression Expression ')' {
+    |$3: Expr, $4: Expr, $5: Expr| -> Expr;
+    $$ = Expr::IfExpression(Box::new($3), Box::new($4), Box::new($5))
+  }
+  | '(' WHILE Expression Expression ')' {
+    |$3: Expr, $4: Expr| -> Expr;
+    $$ = Expr::WhileStatement(Box::new($3), Box::new($4))
+  }
+  | '(' ASSIGN IDENTIFIER Expression ')' {
+    |$3: String, $4: Expr| -> Expr;
+    $$ = Expr::Assignment($3, Box::new($4))
+  }
+  | '(' OPERATOR Expression Expression ')' {
+    |$3: String, $4: Expr, $5: Expr| -> Expr;
+    $$ = Expr::BinaryExpression($3, Box::new($4), Box::new($5))
+  }
+  ;
+

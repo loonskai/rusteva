@@ -1,5 +1,5 @@
 use std::{cell::RefCell, fmt::Debug, rc::Rc};
-use syntax::{Expr, Value};
+use syntax::{Parser, Expr, Value};
 use unicode_segmentation::{self, UnicodeSegmentation};
 use crate::environment::Environment;
 
@@ -659,12 +659,14 @@ mod tests {
   #[test]
   fn syntax_tool() {
     let mut eva = Eva::new();
-    let program = "
+    let mut parser = Parser::new();
+
+    let expr = parser.parse("
       (begin
         (var x 10)
         (var y 20)
         (+ (* x 10) y))
-    ";
-    let expected = 120;
+    ");
+    assert_eq!(eva.eval(expr, None), Some(Value::Int(120)));
   }
 }
