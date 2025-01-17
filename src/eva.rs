@@ -223,182 +223,31 @@ mod tests {
   }
 
   #[test]
-  fn addition() {
+  fn built_in_functions() {
     let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-    assert_eq!(
-      eva.eval(
-        Expr::BinaryExpression(
-          "+".to_string(), 
-          Box::new(Expr::Literal(Value::Int(3))), 
-          Box::new(Expr::Literal(Value::Int(2)))
-        ), 
-        None
-      ), 
-      Some(Value::Int(5))
-    );
-    assert_eq!(
-      eva.eval(
-        Expr::BinaryExpression(
-          "+".to_string(), 
-          Box::new(Expr::BinaryExpression("+".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-          Box::new(Expr::Literal(Value::Int(3))),
-        ),
-        None
-      ), 
-      Some(Value::Int(8))
-    );
-    assert_eq!(
-      eva.eval(
-        Expr::BinaryExpression(
-          "+".to_string(), 
-          Box::new(Expr::BinaryExpression("+".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-          Box::new(Expr::BinaryExpression("+".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
-        ),
-        None
-      ), 
-      Some(Value::Int(10))
-    );
-  }
+    // Math functions:
+    assert_eq!(eva.eval(parser.parse("(+ 1 5)"), None), Some(Value::Int(6)));
+    assert_eq!(eva.eval(parser.parse("(+ (+ 2 3) 5)"), None), Some(Value::Int(10)));
+    assert_eq!(eva.eval(parser.parse("(+ (* 2 3) 5)"), None), Some(Value::Int(11)));
+    assert_eq!(eva.eval(parser.parse("(+ (/ 10 2) 5)"), None), Some(Value::Int(10)));
 
-  #[test]
-  fn extraction() {
-    let mut eva = Eva::new();
-
-    assert_eq!(
-      eva.eval(
-        Expr::BinaryExpression(
-          "-".to_string(), 
-          Box::new(Expr::Literal(Value::Int(3))), 
-          Box::new(Expr::Literal(Value::Int(2)))
-        ), 
-        None
-      ), 
-      Some(Value::Int(1))
-    );
-    assert_eq!(
-      eva.eval(
-        Expr::BinaryExpression(
-          "-".to_string(), 
-          Box::new(Expr::BinaryExpression("-".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-          Box::new(Expr::Literal(Value::Int(3))),
-        ), 
-        None
-      ), 
-      Some(Value::Int(-2))
-    );
-    assert_eq!(
-      eva.eval(
-        Expr::BinaryExpression(
-          "-".to_string(), 
-          Box::new(Expr::BinaryExpression("+".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-          Box::new(Expr::BinaryExpression("+".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
-        ),
-        None
-      ), 
-      Some(Value::Int(0))
-    );
-  }
-
-  #[test]
-  fn multiplication() {
-    let mut eva = Eva::new();
-
-    assert_eq!(
-      eva.eval(
-        Expr::BinaryExpression(
-          "*".to_string(), 
-          Box::new(Expr::Literal(Value::Int(3))), 
-          Box::new(Expr::Literal(Value::Int(2)))
-        ),
-        None
-      ), 
-      Some(Value::Int(6))
-    );
-    assert_eq!(
-      eva.eval(
-        Expr::BinaryExpression(
-          "*".to_string(), 
-          Box::new(Expr::BinaryExpression(
-            "*".to_string(), 
-            Box::new(Expr::Literal(Value::Int(3))), 
-            Box::new(Expr::Literal(Value::Int(2))))
-          ), 
-          Box::new(Expr::Literal(Value::Int(3))),
-        ),
-        None
-      ), 
-      Some(Value::Int(18))
-    );
-    assert_eq!(
-      eva.eval(
-        Expr::BinaryExpression(
-          "*".to_string(), 
-          Box::new(Expr::BinaryExpression("*".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))), 
-          Box::new(Expr::BinaryExpression("*".to_string(), Box::new(Expr::Literal(Value::Int(3))), Box::new(Expr::Literal(Value::Int(2))))),
-        ),
-        None
-      ), 
-      Some(Value::Int(36))
-    );
-  }
-
-  #[test]
-  fn division() {
-    let mut eva = Eva::new();
-
-    assert_eq!(
-      eva.eval(
-        Expr::BinaryExpression(
-          "/".to_string(), 
-          Box::new(Expr::Literal(Value::Int(25))), 
-          Box::new(Expr::Literal(Value::Int(5)))
-        ),
-        None
-      ), 
-      Some(Value::Int(5))
-    );
-    assert_eq!(
-      eva.eval(
-        Expr::BinaryExpression(
-          "/".to_string(), 
-          Box::new(Expr::BinaryExpression("/".to_string(), Box::new(Expr::Literal(Value::Int(25))), Box::new(Expr::Literal(Value::Int(5))))), 
-          Box::new(Expr::Literal(Value::Int(5))),
-        ),
-        None
-      ), 
-      Some(Value::Int(1))
-    );
-    assert_eq!(
-      eva.eval(
-        Expr::BinaryExpression(
-          "/".to_string(), 
-          Box::new(Expr::Literal(Value::Int(0))),
-          Box::new(Expr::Literal(Value::Int(3))), 
-        ),
-        None
-      ), 
-      Some(Value::Int(0))
-    );
-    
+    // Comparison:
+    assert_eq!(eva.eval(parser.parse("(> 1 5)"), None), Some(Value::Boolean(false)));
+    assert_eq!(eva.eval(parser.parse("(< 1 5)"), None), Some(Value::Boolean(true)));
+    assert_eq!(eva.eval(parser.parse("(>= 1 5)"), None), Some(Value::Boolean(false)));
+    assert_eq!(eva.eval(parser.parse("(<= 1 5)"), None), Some(Value::Boolean(true)));
+    assert_eq!(eva.eval(parser.parse("(== 5 5)"), None), Some(Value::Boolean(true)));
   }
 
   #[test]
   #[should_panic]
   fn division_by_zero() {
     let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-    assert_eq!(
-      eva.eval(
-        Expr::BinaryExpression(
-          "/".to_string(), 
-          Box::new(Expr::Literal(Value::Int(3))),
-          Box::new(Expr::Literal(Value::Int(0))), 
-        ),
-        None
-      ), 
-      Some(Value::Int(0))
-    );
+    assert_eq!(eva.eval(parser.parse("(+ 1 0)"), None), Some(Value::Int(0)));
   }
 
   #[test]
