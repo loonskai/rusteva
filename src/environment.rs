@@ -21,14 +21,6 @@ impl Environment {
 
   // (var x 10)
   pub fn define(&mut self, id: &String, value: Value) -> Result<&Value, RuntimeError> {
-    // validate id name starts with a-z
-    if !id.starts_with(|c| -> bool {
-      let code = u32::from(c);
-      println!("{}", code);
-      return code >= 97 && code <= 122; 
-    }) {
-      return Err(RuntimeError::syntax_error(format!("invalid identifier name \"{}\"", &id)));
-    }
     match self.record.insert(id.clone(), value) {
       Some(_) => Err(RuntimeError::syntax_error(format!("identifier  \"{}\" has already been defined.", id))),
       None => self.record.get(id).ok_or(RuntimeError::syntax_error(format!("fatal. \"{}\" cannot be defined.", id))), 
@@ -63,7 +55,6 @@ impl Environment {
 #[cfg(test)]
 mod tests {
     use syntax::Value;
-
     use super::Environment;
 
     #[test]

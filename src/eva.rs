@@ -1,5 +1,5 @@
 use std::{cell::RefCell, fmt::Debug, rc::Rc};
-use syntax::{Parser, Expr, Value};
+use syntax::{Expr, Func, Value};
 use unicode_segmentation::{self, UnicodeSegmentation};
 use crate::environment::Environment;
 
@@ -10,12 +10,55 @@ pub struct Eva {
 
 impl Eva {
   // Create global environment
-  // Predefine values: null, true, false
+  // Predefined values: null, true, false, math operations
   pub fn new() -> Self {
     let mut global_env = Environment::new(None);
     let _ = global_env.define(&"null".to_string(), Value::Null);
     let _ = global_env.define(&"true".to_string(), Value::Boolean(true));
-    let _ = global_env.define(&"false".to_string(), Value::Boolean(false)); 
+    let _ = global_env.define(&"false".to_string(), Value::Boolean(false));
+    let _ = global_env.define(&"+".to_string(), Value::Function(Func::new(|args| {
+      if args.len() != 2 {
+        return Err("Addition operation must have 2 arguments".to_string());
+      }
+      return match (&args[0], &args[1]) {
+        (Value::Int(n1), Value::Int(n2)) => Ok(Value::Int(n1+n2)),
+        _ => Err("Invalid operand type".to_string())
+      }
+    })));
+    let _ = global_env.define(&"*".to_string(), Value::Function(Func::new(|args| {
+      if args.len() != 2 {
+        return Err("Multiplication operation must have 2 arguments".to_string());
+      }
+      return match (&args[0], &args[1]) {
+        (Value::Int(n1), Value::Int(n2)) => Ok(Value::Int(n1*n2)),
+        _ => Err("Invalid operand type".to_string())
+      }
+    })));
+    let _ = global_env.define(&"-".to_string(), Value::Function(Func::new(|args| {
+      if args.len() != 2 {
+        return Err("Multiplication operation must have 2 arguments".to_string());
+      }
+      return match (&args[0], &args[1]) {
+        (Value::Int(n1), Value::Int(n2)) => Ok(Value::Int(n1-n2)),
+        _ => Err("Invalid operand type".to_string())
+      }
+    })));
+    let _ = global_env.define(&"/".to_string(), Value::Function(Func::new(|args| {
+      if args.len() != 2 {
+        return Err("Multiplication operation must have 2 arguments".to_string());
+      }
+      
+      return match (&args[0], &args[1]) {
+        (Value::Int(n1), Value::Int(n2)) => {
+          if *n2 == 0 {
+            return Err("Attempt to divide by zero.".to_string())
+          }
+          Ok(Value::Int(n1/n2))
+        },
+        _ => Err("Invalid operand type".to_string())
+      }
+    })));
+    
     Eva {
       global: Rc::new(RefCell::new(global_env)),
     }
@@ -35,6 +78,7 @@ impl Eva {
               return None
             },
             Value::Boolean(b) => Some(Value::Boolean(b)),
+            Value::Function(f) => Some(Value::Function(f)),
             Value::Null => None
           }
         }
@@ -43,22 +87,7 @@ impl Eva {
           let v2 = self.eval(*exp2, Some(Rc::clone(&env))).expect("Invalid operand");
           match (v1, v2) {
             (Value::Int(n1), Value::Int(n2)) => {
-              let operator_str = operator.as_str();
-              if matches!(operator_str, "+" | "-" | "*" | "/") {
-                let result = match operator_str {
-                  "+" => n1 + n2,
-                  "-" => n1 - n2,
-                  "*" => n1 * n2,
-                  "/" => {
-                    if n2 == 0 {
-                      panic!("Attempt to divide by zero.")
-                    }
-                    n1 / n2
-                  },
-                  _ => panic!("Unknown operator")
-                };
-                return Some(Value::Int(result));
-              } else if matches!(operator.as_str(), ">" | "<" | ">=" | "<=" | "==") {
+              if matches!(operator.as_str(), ">" | "<" | ">=" | "<=" | "==") {
                 let result = match operator.as_str() {
                   ">" => n1 > n2,
                   "<" => n1 < n2,
@@ -76,9 +105,6 @@ impl Eva {
           }
         }
         Expr::VariableDeclaration(id_name, exp) => {
-          // if var_keyword !=  {
-            // panic!("Unknown keyword: {}", var_keyword);
-          // }
           if let Some(value) = self.eval(*exp, Some(Rc::clone(&env))) {
             if let Ok(result) = env.borrow_mut().define(&id_name, value) {
               return Some(result.clone())
@@ -94,24 +120,15 @@ impl Eva {
           }
         },
         Expr::BlockStatement(expressions) => {
-          // if keyword != "begin" {
-          //   panic!("Invalid block statement")
-          // }
           let block_env = Environment::new(Some(env)); // BROKEN - we must not clone the parent env
           self.eval_block(expressions, Rc::new(RefCell::new(block_env)))
         },
         Expr::Assignment(id, expr) => {
-          // if keyword != "set" {
-          //   panic!("Invalid assignment")
-          // }
           let result = self.eval(*expr, Some(Rc::clone(&env))).map_or(Value::Null, |value| value);
           let _ = env.borrow_mut().set(&id, result.clone());
           Some(result)
         },
         Expr::IfExpression(condition_expr, consequent_expr, alternate_exp) => {
-          // if keyword != "if" {
-          //   panic!("Invalid assignment");
-          // }
           let result = self.eval(*condition_expr, Some(Rc::clone(&env)));
           if let Some(cond) = result {
             match cond {
@@ -146,6 +163,25 @@ impl Eva {
             condition_result = self.eval(condition.clone(), Some(Rc::clone(&env)));
           }
           return consequent_result;
+        },
+        Expr::CallExpression(func_name, args) => {
+          // Lookup the function by name
+          let func_definition = self.eval(Expr::Identifier(func_name.clone()), Some(Rc::clone(&env))).map(|v| {
+            match v {
+              Value::Function(f) => f,
+              _ => panic!("Invalid function format: {}", func_name),
+            }
+          });
+          return match func_definition {
+            Some(func) => {
+              let values = args.iter().map(|exp| self.eval(exp.clone(), Some(Rc::clone(&env))).expect("Unable to evaluate arguments")).collect();
+              match func.call(values) {
+                  Ok(v) =>  Some(v),
+                  Err(message) => panic!("{}", message)
+              }
+            },
+            None => None
+          }
         }
     }
   }
@@ -163,6 +199,7 @@ impl Eva {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use syntax::Parser;
 
   #[test]
   fn default_globals() {
@@ -233,7 +270,7 @@ mod tests {
     assert_eq!(eva.eval(parser.parse("(+ (* 2 3) 5)"), None), Some(Value::Int(11)));
     assert_eq!(eva.eval(parser.parse("(+ (/ 10 2) 5)"), None), Some(Value::Int(10)));
 
-    // Comparison:
+    // // Comparison - still as binary expression:
     assert_eq!(eva.eval(parser.parse("(> 1 5)"), None), Some(Value::Boolean(false)));
     assert_eq!(eva.eval(parser.parse("(< 1 5)"), None), Some(Value::Boolean(true)));
     assert_eq!(eva.eval(parser.parse("(>= 1 5)"), None), Some(Value::Boolean(false)));
@@ -247,90 +284,62 @@ mod tests {
     let mut eva = Eva::new();
     let mut parser = Parser::new();
 
-    assert_eq!(eva.eval(parser.parse("(+ 1 0)"), None), Some(Value::Int(0)));
+    assert_eq!(eva.eval(parser.parse("(/ 1 0)"), None), Some(Value::Int(0)));
   }
 
   #[test]
   fn variable_declaration() {
     let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
     assert_eq!(
-      eva.eval(
-        Expr::VariableDeclaration(
-          "x".to_string(), 
-         Box::new(Expr::Literal(Value::Int(10)))
-        ),
-        None,
-      ), 
+      eva.eval(parser.parse("(var x 10)"), None),
       Some(Value::Int(10))
     );
-    assert!(
-      matches!(
-        eva.global.borrow().lookup(&"x".to_string()),
-        Ok(Value::Int(10))
-      )
+    assert_eq!(
+      eva.eval(parser.parse("x"), None),
+      Some(Value::Int(10))
     );
-
-    eva.eval(
-      Expr::VariableDeclaration(
-        "z".to_string(),
-        Box::new(
-          Expr::BinaryExpression(
-            "+".to_string(),
-            Box::new(Expr::Literal(Value::Int(2))),
-            Box::new(Expr::Literal(Value::Int(4))),
-        ),
-      )),
-      None,
-    );
-    assert!(
-      matches!(
-        eva.global.borrow().lookup(&"z".to_string()),
-        Ok(Value::Int(6))
-      )
+    eva.eval(parser.parse("(var z (+ 2 4))"), None);
+    assert_eq!(
+      eva.eval(parser.parse("z"), None),
+      Some(Value::Int(6))
     );
   }
 
   #[test]
   fn block_statement() {
     let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-    let expr1 =  Expr::VariableDeclaration("x".to_string(), Box::new(Expr::Literal(Value::Int(10))));
-    let expr2 = Expr::VariableDeclaration("y".to_string(), Box::new(Expr::Literal(Value::Int(20))));
-    let expr3 = Expr::BinaryExpression(
-      "+".to_string(),
-      Box::new(Expr::BinaryExpression(
-        "*".to_string(), 
-        Box::new(Expr::Identifier("x".to_string())),
-        Box::new(Expr::Identifier("y".to_string())))
-      ),
-      Box::new(Expr::Literal(Value::Int(30))),
-    );
     assert_eq!(
-      eva.eval(
-        Expr::BlockStatement(vec![expr1, expr2, expr3]), 
+      eva.eval(parser.parse("
+        (begin
+          (var x 10)
+          (var y 20)
+          (+ (* x y) 30)
+        )
+      "),
         None
       ),
       Some(Value::Int(230))
-    )
+    );
   }
 
   #[test]
   fn nested_blocks() {
     let mut eva = Eva::new();
-
-    let expr1 = Expr::VariableDeclaration("x".to_string(), Box::new(Expr::Literal(Value::Int(10))));
-    let block_lvl_2 = Expr::BlockStatement(vec![
-      Expr::VariableDeclaration("x".to_string(), Box::new(Expr::Literal(Value::Int(20)))),
-      Expr::Identifier("x".to_string()),
-    ]);
-    let expr2 = Expr::Identifier("x".to_string());
+    let mut parser = Parser::new();
 
     assert_eq!(
-      eva.eval(
-        Expr::BlockStatement(vec![expr1, block_lvl_2, expr2]),
-        None,
-      ),
+      eva.eval(parser.parse("
+        (begin
+          (var x 10)
+          (begin
+            (var x 20))
+          x
+        )
+      "), None),
       Some(Value::Int(10)),
     );
   }
@@ -338,17 +347,17 @@ mod tests {
   #[test]
   fn outer_scope_reference() {
     let mut eva = Eva::new();
-
-    let expr1 = Expr::VariableDeclaration("x".to_string(), Box::new(Expr::Literal(Value::Int(10))));
-    let expr2 = Expr::VariableDeclaration("y".to_string(), Box::new(
-      Expr::BlockStatement(vec![
-        Expr::Identifier("x".to_string())
-      ]),
-    ));
-    let expr3 = Expr::Identifier("y".to_string());
+    let mut parser = Parser::new();
 
     assert_eq!(
-      eva.eval(Expr::BlockStatement(vec![expr1, expr2, expr3]), None),
+      eva.eval(parser.parse("
+        (begin
+          (var x 10)
+          (var y (begin
+            x))
+          y
+        )
+      "), None),
       Some(Value::Int(10))
     )
   }
@@ -356,28 +365,19 @@ mod tests {
   #[test]
   fn scope_chain_traversal() {
     let mut eva = Eva::new();
-
-    let inner_decl = Expr::VariableDeclaration("x".to_string(), Box::new(
-      Expr::BinaryExpression(
-        "+".to_string(), 
-        Box::new(Expr::Identifier("value".to_string())), 
-        Box::new(Expr::Literal(Value::Int(10)))
-      )
-    ));
-    let nested_block = Expr::BlockStatement(vec![
-      inner_decl,
-      Expr::Identifier("x".to_string())
-    ]);
-    let decl_2 = Expr::VariableDeclaration("result".to_string(), Box::new(nested_block));
-    let decl_1 = Expr::VariableDeclaration("value".to_string(), Box::new(Expr::Literal(Value::Int(10))));
-    let outer_block = Expr::BlockStatement(vec![
-      decl_1, 
-      decl_2,
-      Expr::Identifier("result".to_string())
-    ]);
+    let mut parser = Parser::new();
 
     assert_eq!(
-      eva.eval(outer_block, None),
+      eva.eval(parser.parse("
+        (begin
+          (var value 10)
+          (var result (begin
+            (var x (+ value 10))
+            x)
+          )
+          result
+        )
+      "), None),
       Some(Value::Int(20)),
     )
   }
@@ -385,18 +385,16 @@ mod tests {
   #[test]
   fn same_scope_assignment() {
     let mut eva = Eva::new();
-    
+    let mut parser = Parser::new();
+
     assert_eq!(
-      eva.eval(
-        Expr::BlockStatement(
-          vec![
-            Expr::VariableDeclaration("data".to_string(), Box::new(Expr::Literal(Value::Int(10)))), 
-            Expr::Assignment("data".to_string(), Box::new(Expr::Literal(Value::Int(100)))), 
-            Expr::Identifier("data".to_string())
-          ],
-        ), 
-        None
-      ), 
+      eva.eval(parser.parse("
+        (begin
+          (var data 10)
+          (set data 100)
+          data
+        )
+      "), None),
       Some(Value::Int(100))
     );
   }
@@ -404,51 +402,39 @@ mod tests {
   #[test]
   fn outer_scope_assignment() {
     let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-    let outer_decl_1 = Expr::VariableDeclaration("data".to_string(), Box::new(Expr::Literal(Value::Int(10))));
-    let inner_block = Expr::BlockStatement(
-      vec![Expr::Assignment("data".to_string(), Box::new(Expr::Literal(Value::Int(100))))]
+    assert_eq!(
+      eva.eval(parser.parse("
+        (begin
+          (var data 10)
+          (begin
+            (set data 100)
+          )
+          data
+        )
+      "), None),
+      Some(Value::Int(100))
     );
-    let id_reference = Expr::Identifier("data".to_string());
-    let outer_block = Expr::BlockStatement(vec![outer_decl_1, inner_block, id_reference]);
-    assert_eq!(eva.eval(outer_block, None), Some(Value::Int(100)));
   }
 
   #[test]
   fn if_expression() {
     let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
     assert_eq!(
-      eva.eval(
-        Expr::BlockStatement(
-          vec![
-            Expr::VariableDeclaration("x".to_string(), Box::new(Expr::Literal(Value::Int(10)))),
-            Expr::VariableDeclaration("y".to_string(), Box::new(Expr::Literal(Value::Int(0)))),
-            Expr::IfExpression(
-              Box::new(
-                Expr::BinaryExpression(
-                  ">".to_string(), 
-                  Box::new(Expr::Identifier("x".to_string())),
-                  Box::new(Expr::Literal(Value::Int(10)))
-                ),
-              ),
-              Box::new(
-                Expr::Assignment(
-                  "y".to_string(), 
-                  Box::new(Expr::Literal(Value::Int(20)))
-                ),
-              ),
-              Box::new(
-                Expr::Assignment(
-                  "y".to_string(), 
-                  Box::new(Expr::Literal(Value::Int(30)))
-                ),
-              ), 
-            )
-          ]
-        ),
-        None
-      ),
+      eva.eval(parser.parse("
+        (begin
+          (var x 10)
+          (var y 0)
+          (if
+            (> x 10)
+            (set y 20)
+            (set y 30)
+          )
+        )
+      "), None),
       Some(Value::Int(30))
     )
   }
@@ -456,66 +442,25 @@ mod tests {
   #[test]
   fn while_statement() {
     let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
     assert_eq!(
-      eva.eval(
-        Expr::BlockStatement(
-          vec![
-            Expr::VariableDeclaration(
-              "counter".to_string(),
-              Box::new(Expr::Literal(Value::Int(0)))
-            ),
-            Expr::VariableDeclaration(
-              "result".to_string(),
-              Box::new(Expr::Literal(Value::Int(0)))
-            ),
-            Expr::WhileStatement(
-              Box::new(Expr::BinaryExpression(
-                "<".to_string(),
-                Box::new(Expr::Identifier("counter".to_string())),
-                Box::new(Expr::Literal(Value::Int(10))),
-              )),
-              Box::new(Expr::BlockStatement(
-                vec![
-                  Expr::Assignment(
-                    "result".to_string(),
-                    Box::new(Expr::BinaryExpression(
-                      "+".to_string(), 
-                      Box::new(Expr::Identifier("result".to_string())), 
-                      Box::new(Expr::Literal(Value::Int(1))))
-                    ), 
-                  ),
-                  Expr::Assignment(
-                    "counter".to_string(),
-                    Box::new(Expr::BinaryExpression(
-                      "+".to_string(), 
-                      Box::new(Expr::Identifier("counter".to_string())), 
-                      Box::new(Expr::Literal(Value::Int(1))))
-                    ), 
-                  )
-                ]
-              ))
-            ),
-            Expr::Identifier("result".to_string())
-          ]
-        ), 
-        None
-      ),
+      eva.eval(parser.parse("
+        (begin
+          (var counter 0)
+          (var result 0)
+          (while
+            (< counter 10)
+            (begin
+              (set counter (+ result 1))
+              (set result (+ result 1))
+            )
+          )
+          result
+        )
+      "), None),
       Some(Value::Int(10))
     )
   }
 
-  #[test]
-  fn syntax_tool() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
-
-    let expr = parser.parse("
-      (begin
-        (var x 10)
-        (var y 20)
-        (+ (* x 10) y))
-    ");
-    assert_eq!(eva.eval(expr, None), Some(Value::Int(120)));
-  }
 }

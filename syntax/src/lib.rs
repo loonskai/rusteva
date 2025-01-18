@@ -18,8 +18,7 @@ enum SV {
     _0(Token),
     _1(Value),
     _2(Expr),
-    _3(Vec<Expr>),
-    _4(String)
+    _3(Vec<Expr>)
 }
 
 /**
@@ -38,8 +37,8 @@ static LEX_RULES: [&'static str; 14] = [
     r##########"^if"##########,
     r##########"^while"##########,
     r##########"^set"##########,
-    r##########"^[+\-*/=<>]+"##########,
-    r##########"^[\w]+"##########
+    r##########"^[=<>]+"##########,
+    r##########"^[+\-*/\w]+"##########
 ];
 
 /**
@@ -83,7 +82,7 @@ macro_rules! pop {
  *
  * 0 - encoded non-terminal, 1 - length of RHS to pop from the stack
  */
-static PRODUCTIONS : [[i32; 2]; 16] = [
+static PRODUCTIONS : [[i32; 2]; 17] = [
     [-1, 1],
     [0, 1],
     [0, 1],
@@ -94,6 +93,7 @@ static PRODUCTIONS : [[i32; 2]; 16] = [
     [1, 1],
     [2, 2],
     [2, 0],
+    [3, 4],
     [3, 4],
     [3, 5],
     [3, 6],
@@ -146,23 +146,23 @@ lazy_static! {
     hashmap! { 4 => TE::Reduce(5), 5 => TE::Reduce(5), 6 => TE::Reduce(5), 7 => TE::Reduce(5), 8 => TE::Reduce(5), 15 => TE::Reduce(5), 16 => TE::Reduce(5), 17 => TE::Reduce(5) },
     hashmap! { 4 => TE::Reduce(6), 5 => TE::Reduce(6), 6 => TE::Reduce(6), 7 => TE::Reduce(6), 8 => TE::Reduce(6), 15 => TE::Reduce(6), 16 => TE::Reduce(6), 17 => TE::Reduce(6) },
     hashmap! { 4 => TE::Reduce(7), 5 => TE::Reduce(7), 6 => TE::Reduce(7), 7 => TE::Reduce(7), 8 => TE::Reduce(7), 15 => TE::Reduce(7), 16 => TE::Reduce(7), 17 => TE::Reduce(7) },
-    hashmap! { 9 => TE::Shift(10), 10 => TE::Shift(11), 11 => TE::Shift(12), 12 => TE::Shift(13), 13 => TE::Shift(14), 14 => TE::Shift(15) },
-    hashmap! { 2 => TE::Transit(16), 4 => TE::Reduce(9), 5 => TE::Reduce(9), 6 => TE::Reduce(9), 7 => TE::Reduce(9), 8 => TE::Reduce(9), 15 => TE::Reduce(9), 16 => TE::Reduce(9) },
-    hashmap! { 4 => TE::Shift(19) },
-    hashmap! { 0 => TE::Transit(22), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 0 => TE::Transit(26), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 4 => TE::Shift(29) },
-    hashmap! { 0 => TE::Transit(32), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 0 => TE::Transit(18), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9), 16 => TE::Shift(17) },
+    hashmap! { 4 => TE::Shift(11), 9 => TE::Shift(10), 10 => TE::Shift(12), 11 => TE::Shift(13), 12 => TE::Shift(14), 13 => TE::Shift(15), 14 => TE::Shift(16) },
+    hashmap! { 2 => TE::Transit(17), 4 => TE::Reduce(9), 5 => TE::Reduce(9), 6 => TE::Reduce(9), 7 => TE::Reduce(9), 8 => TE::Reduce(9), 15 => TE::Reduce(9), 16 => TE::Reduce(9) },
+    hashmap! { 2 => TE::Transit(20), 4 => TE::Reduce(9), 5 => TE::Reduce(9), 6 => TE::Reduce(9), 7 => TE::Reduce(9), 8 => TE::Reduce(9), 15 => TE::Reduce(9), 16 => TE::Reduce(9) },
+    hashmap! { 4 => TE::Shift(22) },
+    hashmap! { 0 => TE::Transit(25), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
+    hashmap! { 0 => TE::Transit(29), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
+    hashmap! { 4 => TE::Shift(32) },
+    hashmap! { 0 => TE::Transit(35), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
+    hashmap! { 0 => TE::Transit(19), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9), 16 => TE::Shift(18) },
     hashmap! { 4 => TE::Reduce(10), 5 => TE::Reduce(10), 6 => TE::Reduce(10), 7 => TE::Reduce(10), 8 => TE::Reduce(10), 15 => TE::Reduce(10), 16 => TE::Reduce(10), 17 => TE::Reduce(10) },
     hashmap! { 4 => TE::Reduce(8), 5 => TE::Reduce(8), 6 => TE::Reduce(8), 7 => TE::Reduce(8), 8 => TE::Reduce(8), 15 => TE::Reduce(8), 16 => TE::Reduce(8) },
-    hashmap! { 0 => TE::Transit(20), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 16 => TE::Shift(21) },
+    hashmap! { 0 => TE::Transit(19), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9), 16 => TE::Shift(21) },
     hashmap! { 4 => TE::Reduce(11), 5 => TE::Reduce(11), 6 => TE::Reduce(11), 7 => TE::Reduce(11), 8 => TE::Reduce(11), 15 => TE::Reduce(11), 16 => TE::Reduce(11), 17 => TE::Reduce(11) },
     hashmap! { 0 => TE::Transit(23), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 0 => TE::Transit(24), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 16 => TE::Shift(25) },
+    hashmap! { 16 => TE::Shift(24) },
     hashmap! { 4 => TE::Reduce(12), 5 => TE::Reduce(12), 6 => TE::Reduce(12), 7 => TE::Reduce(12), 8 => TE::Reduce(12), 15 => TE::Reduce(12), 16 => TE::Reduce(12), 17 => TE::Reduce(12) },
+    hashmap! { 0 => TE::Transit(26), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
     hashmap! { 0 => TE::Transit(27), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
     hashmap! { 16 => TE::Shift(28) },
     hashmap! { 4 => TE::Reduce(13), 5 => TE::Reduce(13), 6 => TE::Reduce(13), 7 => TE::Reduce(13), 8 => TE::Reduce(13), 15 => TE::Reduce(13), 16 => TE::Reduce(13), 17 => TE::Reduce(13) },
@@ -171,7 +171,10 @@ lazy_static! {
     hashmap! { 4 => TE::Reduce(14), 5 => TE::Reduce(14), 6 => TE::Reduce(14), 7 => TE::Reduce(14), 8 => TE::Reduce(14), 15 => TE::Reduce(14), 16 => TE::Reduce(14), 17 => TE::Reduce(14) },
     hashmap! { 0 => TE::Transit(33), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
     hashmap! { 16 => TE::Shift(34) },
-    hashmap! { 4 => TE::Reduce(15), 5 => TE::Reduce(15), 6 => TE::Reduce(15), 7 => TE::Reduce(15), 8 => TE::Reduce(15), 15 => TE::Reduce(15), 16 => TE::Reduce(15), 17 => TE::Reduce(15) }
+    hashmap! { 4 => TE::Reduce(15), 5 => TE::Reduce(15), 6 => TE::Reduce(15), 7 => TE::Reduce(15), 8 => TE::Reduce(15), 15 => TE::Reduce(15), 16 => TE::Reduce(15), 17 => TE::Reduce(15) },
+    hashmap! { 0 => TE::Transit(36), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
+    hashmap! { 16 => TE::Shift(37) },
+    hashmap! { 4 => TE::Reduce(16), 5 => TE::Reduce(16), 6 => TE::Reduce(16), 7 => TE::Reduce(16), 8 => TE::Reduce(16), 15 => TE::Reduce(16), 16 => TE::Reduce(16), 17 => TE::Reduce(16) }
 ];
 }
 
@@ -193,6 +196,9 @@ lazy_static! {
 //   }
 //
 
+use std::sync::Arc;
+use core::fmt::Debug;
+
 #[derive(Debug,PartialEq,Clone)]
 pub enum Expr {
   Literal(Value),
@@ -202,7 +208,47 @@ pub enum Expr {
   BlockStatement(Vec<Expr>),
   Assignment(String, Box<Expr>),
   IfExpression(Box<Expr>, Box<Expr>, Box<Expr>),
-  WhileStatement(Box<Expr>, Box<Expr>)
+  WhileStatement(Box<Expr>, Box<Expr>),
+  CallExpression(String, Vec<Expr>)
+}
+
+pub struct Func {
+  func: Arc<dyn Fn(Vec<Value>) -> Result<Value, String>> // TODO
+}
+
+impl Func {
+  pub fn new<F>(f: F) -> Self 
+  where 
+    F: Fn(Vec<Value>) -> Result<Value, String> + 'static
+  {
+    Func {
+      func: Arc::new(f)
+    }
+  }
+
+  pub fn call(&self, args: Vec<Value>) -> Result<Value, String> {
+    (self.func)(args)
+  }
+}
+
+impl PartialEq for Func {
+  fn eq(&self, _: &Self) -> bool {
+      false
+  }
+}
+
+impl Debug for Func {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+      write!(f, "Function")
+  }
+}
+
+impl Clone for Func {
+  fn clone(&self) -> Self {
+    Func {
+        func: Arc::clone(&self.func)
+    }
+  }
 }
 
 #[derive(Debug,PartialEq,Clone)]
@@ -210,7 +256,8 @@ pub enum Value {
   Int(isize),
   Str(String),
   Null,
-  Boolean(bool)
+  Boolean(bool),
+  Function(Func)
 }
 
 type TResult = Expr;
@@ -666,7 +713,7 @@ pub struct Parser<'t> {
     /**
      * Semantic action handlers.
      */
-    handlers: [fn(&mut Parser<'t>) -> SV; 16],
+    handlers: [fn(&mut Parser<'t>) -> SV; 17],
 }
 
 impl<'t> Parser<'t> {
@@ -697,7 +744,8 @@ impl<'t> Parser<'t> {
     Parser::_handler12,
     Parser::_handler13,
     Parser::_handler14,
-    Parser::_handler15
+    Parser::_handler15,
+    Parser::_handler16
 ],
         }
     }
@@ -907,17 +955,27 @@ SV::_2(__)
 fn _handler11(&mut self) -> SV {
 // Semantic values prologue.
 self.values_stack.pop();
+let mut _3 = pop!(self.values_stack, _3);
+let mut _2 = pop!(self.values_stack, _0);
+self.values_stack.pop();
+
+let __ = Expr::CallExpression(_2.value.to_string(), _3);
+SV::_2(__)
+}
+
+fn _handler12(&mut self) -> SV {
+// Semantic values prologue.
+self.values_stack.pop();
 let mut _4 = pop!(self.values_stack, _2);
 let mut _3 = pop!(self.values_stack, _0);
 self.values_stack.pop();
 self.values_stack.pop();
 
-let ident = _3.value.to_string();
-    let __ = Expr::VariableDeclaration(ident, Box::new(_4));
+let __ = Expr::VariableDeclaration(_3.value.to_string(), Box::new(_4));
 SV::_2(__)
 }
 
-fn _handler12(&mut self) -> SV {
+fn _handler13(&mut self) -> SV {
 // Semantic values prologue.
 self.values_stack.pop();
 let mut _5 = pop!(self.values_stack, _2);
@@ -930,7 +988,7 @@ let __ = Expr::IfExpression(Box::new(_3), Box::new(_4), Box::new(_5));
 SV::_2(__)
 }
 
-fn _handler13(&mut self) -> SV {
+fn _handler14(&mut self) -> SV {
 // Semantic values prologue.
 self.values_stack.pop();
 let mut _4 = pop!(self.values_stack, _2);
@@ -942,19 +1000,19 @@ let __ = Expr::WhileStatement(Box::new(_3), Box::new(_4));
 SV::_2(__)
 }
 
-fn _handler14(&mut self) -> SV {
+fn _handler15(&mut self) -> SV {
 // Semantic values prologue.
 self.values_stack.pop();
 let mut _4 = pop!(self.values_stack, _2);
-let mut _3 = pop!(self.values_stack, _4);
+let mut _3 = pop!(self.values_stack, _0);
 self.values_stack.pop();
 self.values_stack.pop();
 
-let __ = Expr::Assignment(_3, Box::new(_4));
+let __ = Expr::Assignment(_3.value.to_string(), Box::new(_4));
 SV::_2(__)
 }
 
-fn _handler15(&mut self) -> SV {
+fn _handler16(&mut self) -> SV {
 // Semantic values prologue.
 self.values_stack.pop();
 let mut _4 = pop!(self.values_stack, _2);
@@ -962,8 +1020,7 @@ let mut _3 = pop!(self.values_stack, _2);
 let mut _2 = pop!(self.values_stack, _0);
 self.values_stack.pop();
 
-let ident = _2.value.to_string();
-    let __ = Expr::BinaryExpression(ident, Box::new(_3), Box::new(_4));
+let __ = Expr::BinaryExpression(_2.value.to_string(), Box::new(_3), Box::new(_4));
 SV::_2(__)
 }
 }
