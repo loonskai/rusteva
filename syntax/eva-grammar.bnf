@@ -16,8 +16,8 @@
 'while'            return "WHILE"
 'set'              return "ASSIGN"
 'def'              return "FUNCTION"
-[=<>]+             return "OPERATOR"
-[+\-*/\w]+         return "IDENTIFIER"
+[+\-*/=<>]+        return "OPERATOR"
+[\w]+              return "IDENTIFIER"
 
 /lex
 
@@ -25,9 +25,7 @@
 // Syntactic grammar (BNF)
 
 %{
-use std::sync::Arc;
-use core::fmt::Debug;
-use common::{Value,Expr}
+use common::{Expr,Value};
 
 type TResult = Expr;
 
@@ -78,6 +76,25 @@ ExpressionsList
   }
   ;
 
+ParametersList
+  : '(' Parameters ')' {
+    |$2: Vec<Value>| -> Vec<Value>;
+    $$ = $2
+  }
+  ;
+
+Parameters
+  : Parameters IDENTIFIER {
+    |$1: Vec<Value>, $2: Token| -> Vec<Value>;
+    $1.push(Value::Str($2.value.to_string()));
+    $$ = $1
+  }
+  | /* empty */ {
+    || -> Vec<Value>; 
+    $$ = Vec::new() 
+  }
+  ;
+
 SExpr
   : '(' BEGIN ExpressionsList ')' {
     |$3: Vec<Expr>| -> Expr;
@@ -107,8 +124,8 @@ SExpr
     |$2: Token, $3: Expr, $4: Expr| -> Expr;
     $$ = Expr::BinaryExpression($2.value.to_string(), Box::new($3), Box::new($4))
   }
-  | '(' FUNCTION IDENTIFIER ExpressionsList Expression ')' {
-    |$3: Token, $4: Vec<Expr>, $5: Expr| -> Expr;
+  | '(' FUNCTION IDENTIFIER ParametersList Expression ')' {
+    |$3: Token, $4: Vec<Value>, $5: Expr| -> Expr;
     $$ = Expr::FunctionDeclaration($3.value.to_string(), $4, Box::new($5))
   }
   ;

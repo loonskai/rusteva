@@ -1,14 +1,24 @@
 pub mod environment;
 pub mod error;
 
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 use environment::Environment;
 
 #[derive(Debug,PartialEq,Clone)]
-pub struct Func {
-    params: Vec<String>,
-    body: Box<Expr>,
-    env: Rc<Environment>
+pub struct FuncObj {
+    pub params: Vec<Value>,
+    pub body: Box<Expr>,
+    pub env: Rc<RefCell<Environment>>
+}
+
+impl FuncObj {
+    pub fn new(params: Vec<Value>, body: Box<Expr>, env: Rc<RefCell<Environment>>) -> Self {
+        FuncObj {
+            params,
+            body,
+            env
+        }
+    }
 }
 
 #[derive(Debug,PartialEq,Clone)]
@@ -17,7 +27,7 @@ pub enum Value {
     Str(String),
     Null,
     Boolean(bool),
-    Function(Func)
+    Function(FuncObj)
 }
 
 #[derive(Debug,PartialEq,Clone)]
@@ -31,7 +41,7 @@ pub enum Expr {
     IfExpression(Box<Expr>, Box<Expr>, Box<Expr>),
     WhileStatement(Box<Expr>, Box<Expr>),
     CallExpression(String, Vec<Expr>),
-    FunctionDeclaration(String, Vec<Expr>, Box<Expr>)
+    FunctionDeclaration(String, Vec<Value>, Box<Expr>)
 }
 
 

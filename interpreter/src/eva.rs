@@ -1,6 +1,30 @@
-use std::{cell::RefCell, collections::HashMap, fmt::Debug, rc::Rc};
-use common::{Func, environment::Environment, Expr , Value};
+use std::{cell::RefCell, fmt::Debug, rc::Rc};
+use common::{FuncObj, environment::Environment, Expr , Value};
 use unicode_segmentation::{self, UnicodeSegmentation};
+
+macro_rules! define_global_variables {
+    ($global:expr, $($key_value:expr),*) => {
+        $(
+          let (key, value) = $key_value;
+          let _ = $global.borrow_mut().define(&key.to_string(), value);
+        )*
+    };
+}
+
+macro_rules! define_binary_operators {
+    ($global:expr, $($op:expr),* ) => {
+        $(
+          let n1 = Value::Str("n1".to_string());
+          let n2 = Value::Str("n2".to_string());
+          let _ = $global.borrow_mut().define(&$op.to_string(), Value::Function(FuncObj::new(
+            vec![n1.clone(), n2.clone()],
+            Box::new(Expr::BinaryExpression($op.to_string(), Box::new(Expr::Literal(n1)), Box::new(Expr::Literal(n2)))),
+            Rc::clone(&$global)
+            )
+          ));
+        )*
+    };
+}
 
 #[derive(Debug)]
 pub struct Eva {
@@ -11,56 +35,16 @@ impl Eva {
   // Create global environment
   // Predefined values: null, true, false, math operations
   pub fn new() -> Self {
-    let mut global_env = Environment::new(None);
-    let _ = global_env.define(&"null".to_string(), Value::Null);
-    let _ = global_env.define(&"true".to_string(), Value::Boolean(true));
-    let _ = global_env.define(&"false".to_string(), Value::Boolean(false));
-    let _ = global_env.define(&"+".to_string(), Value::Function(Func::new(|args| {
-      if args.len() != 2 {
-        return Err("Addition operation must have 2 arguments".to_string());
-      }
-      return match (&args[0], &args[1]) {
-        (Value::Int(n1), Value::Int(n2)) => Ok(Value::Int(n1+n2)),
-        _ => Err("Invalid operand type".to_string())
-      }
-    })));
-    let _ = global_env.define(&"*".to_string(), Value::Function(Func::new(|args| {
-      if args.len() != 2 {
-        return Err("Multiplication operation must have 2 arguments".to_string());
-      }
-      return match (&args[0], &args[1]) {
-        (Value::Int(n1), Value::Int(n2)) => Ok(Value::Int(n1*n2)),
-        _ => Err("Invalid operand type".to_string())
-      }
-    })));
-    let _ = global_env.define(&"-".to_string(), Value::Function(Func::new(|args| {
-      if args.len() != 2 {
-        return Err("Multiplication operation must have 2 arguments".to_string());
-      }
-      return match (&args[0], &args[1]) {
-        (Value::Int(n1), Value::Int(n2)) => Ok(Value::Int(n1-n2)),
-        _ => Err("Invalid operand type".to_string())
-      }
-    })));
-    let _ = global_env.define(&"/".to_string(), Value::Function(Func::new(|args| {
-      if args.len() != 2 {
-        return Err("Multiplication operation must have 2 arguments".to_string());
-      }
-      
-      return match (&args[0], &args[1]) {
-        (Value::Int(n1), Value::Int(n2)) => {
-          if *n2 == 0 {
-            return Err("Attempt to divide by zero.".to_string())
-          }
-          Ok(Value::Int(n1/n2))
-        },
-        _ => Err("Invalid operand type".to_string())
-      }
-    })));
-    
-    Eva {
-      global: Rc::new(RefCell::new(global_env)),
-    }
+    let global = Rc::new(RefCell::new(Environment::new(None)));
+    define_global_variables!(
+      global, 
+      ("null", Value::Null), 
+      ("true", Value::Boolean(true)), 
+      ("false", Value::Boolean(false))
+    );
+    define_binary_operators!(global, "+", "-", "*", "/");
+
+    Eva { global }
   }
 
   pub fn eval(&mut self, exp: Expr, current_env: Option<Rc<RefCell<Environment>>>) -> Option<Value> {
@@ -96,6 +80,20 @@ impl Eva {
                 _ => panic!("Unknown operator")
               };
               return Some(Value::Boolean(result));
+            } else if matches!(operator.as_str(), "+" | "-" | "*" | "/") {
+              let result = match operator.as_str() {
+                "+" => n1 + n2,
+                "-" => n1 - n2,
+                "*" => n1 * n2,
+                "/" => {
+                  if n2 == 0 {
+                    panic!("Attempt to divide by zero.")
+                  }
+                  n1 / n2
+                },
+                _ => panic!("Unknown operator")
+              };
+              return Some(Value::Int(result));
             } else {
               panic!("Invalid operator")
             }
@@ -160,34 +158,37 @@ impl Eva {
         }
         return consequent_result;
       },
-      Expr::CallExpression(func_name, func_obj) => {
+      Expr::CallExpression(func_name, args) => {
         // Lookup the function by name
-        let func_definition = self.eval(Expr::Identifier(func_name.clone()), Some(Rc::clone(&env))).map(|v| {
+        let func_obj = self.eval(Expr::Identifier(func_name.clone()), Some(Rc::clone(&env))).map(|v| {
           match v {
             Value::Function(f) => f,
             _ => panic!("Invalid function format: {}", func_name),
           }
-        });
-        let activation_env = Environment::new(func_obj.env);
-        return match func_definition {
-          Some(func) => {
-            let values = args.iter().map(|exp| self.eval(exp.clone(), Some(Rc::clone(&env))).expect("Unable to evaluate arguments")).collect();
-            match func.call(values) {
-                Ok(v) =>  Some(v),
-                Err(message) => panic!("{}", message)
-            }
-          },
-          None => None
+        }).expect("Function not found");
+        if args.len() != func_obj.params.len() {
+          panic!("Function arguments mismatch!")
         }
+        let mut activation_env = Environment::new(Some(func_obj.env));
+        for param in func_obj.params.into_iter().enumerate() {
+          match &param {
+            (index, Value::Str(param_name)) => {
+              let evaluated_arg = self.eval(args[*index].clone(), Some(Rc::clone(&env))).expect("Unable to evaluate argument");
+              let _ = activation_env.define(param_name, evaluated_arg);
+            },
+            _ => panic!("Invalid function parameter format")
+          }
+        }
+        self.eval(*func_obj.body, Some(Rc::new(RefCell::new(activation_env))))
       },
       Expr::FunctionDeclaration(func_name, params, body) => {
-        let func_object = HashMap::from([
-          ("params", params),
-          ("body", body),
-          ("env", Rc::clone(&env)) // Closure
-        ]);
-        env.borrow().define(&func_name,  Value::Function(Func::new()));
-        return None
+        let func_object = FuncObj::new(
+          params,
+          body,
+           Rc::clone(&env), // Closure
+        );
+        let _ = env.borrow_mut().define(&func_name,  Value::Function(func_object));
+        None
       },
     }
   }
@@ -199,8 +200,8 @@ impl Eva {
     }
     result
   }
-}
 
+}
 
 #[cfg(test)]
 mod tests {
@@ -470,7 +471,7 @@ mod tests {
   }
 
   #[test]
-  fn function_declaration() {
+  fn user_defined_functions() {
     let mut eva = Eva::new();
     let mut parser = Parser::new();
 
@@ -480,7 +481,38 @@ mod tests {
         (square 2)
       )
       "), None),
-      Some(Value::Int(2))
+      Some(Value::Int(4))
+    );
+    assert_eq!(eva.eval(parser.parse("
+      (begin 
+        (def calc (x y) 
+          (begin
+            (var z 30)
+            (+ (* x y) z)
+          )
+        )
+        (calc 10 20)
+      )
+      "), None),
+      Some(Value::Int(230))
+    );
+    assert_eq!(eva.eval(parser.parse("
+      (begin
+        (var value 100)
+        (def calc (x y) 
+          (begin
+            (var z (+ x y))
+            (def inner (foo)
+              (+ (+ foo z) value)
+            )
+            inner
+          )
+        )
+        (var fn (calc 10 20))
+        (fn 30)
+      )
+      "), None),
+      Some(Value::Int(160))
     );
   }
 }
