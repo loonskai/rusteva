@@ -15,6 +15,7 @@
 'if'               return "IF"
 'while'            return "WHILE"
 'set'              return "ASSIGN"
+'def'              return "FUNCTION"
 [=<>]+             return "OPERATOR"
 [+\-*/\w]+         return "IDENTIFIER"
 
@@ -26,67 +27,7 @@
 %{
 use std::sync::Arc;
 use core::fmt::Debug;
-
-#[derive(Debug,PartialEq,Clone)]
-pub enum Expr {
-  Literal(Value),
-  BinaryExpression(String, Box<Expr>, Box<Expr>),
-  VariableDeclaration(String, Box<Expr>),
-  Identifier(String),
-  BlockStatement(Vec<Expr>),
-  Assignment(String, Box<Expr>),
-  IfExpression(Box<Expr>, Box<Expr>, Box<Expr>),
-  WhileStatement(Box<Expr>, Box<Expr>),
-  CallExpression(String, Vec<Expr>)
-}
-
-pub struct Func {
-  func: Arc<dyn Fn(Vec<Value>) -> Result<Value, String>> // TODO
-}
-
-impl Func {
-  pub fn new<F>(f: F) -> Self 
-  where 
-    F: Fn(Vec<Value>) -> Result<Value, String> + 'static
-  {
-    Func {
-      func: Arc::new(f)
-    }
-  }
-
-  pub fn call(&self, args: Vec<Value>) -> Result<Value, String> {
-    (self.func)(args)
-  }
-}
-
-impl PartialEq for Func {
-  fn eq(&self, _: &Self) -> bool {
-      false
-  }
-}
-
-impl Debug for Func {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-      write!(f, "Function")
-  }
-}
-
-impl Clone for Func {
-  fn clone(&self) -> Self {
-    Func {
-        func: Arc::clone(&self.func)
-    }
-  }
-}
-
-#[derive(Debug,PartialEq,Clone)]
-pub enum Value {
-  Int(isize),
-  Str(String),
-  Null,
-  Boolean(bool),
-  Function(Func)
-}
+use common::{Value,Expr}
 
 type TResult = Expr;
 
@@ -165,6 +106,10 @@ SExpr
   | '(' OPERATOR Expression Expression ')' {
     |$2: Token, $3: Expr, $4: Expr| -> Expr;
     $$ = Expr::BinaryExpression($2.value.to_string(), Box::new($3), Box::new($4))
+  }
+  | '(' FUNCTION IDENTIFIER ExpressionsList Expression ')' {
+    |$3: Token, $4: Vec<Expr>, $5: Expr| -> Expr;
+    $$ = Expr::FunctionDeclaration($3.value.to_string(), $4, Box::new($5))
   }
   ;
 

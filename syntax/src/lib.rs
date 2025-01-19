@@ -24,7 +24,7 @@ enum SV {
 /**
  * Lex rules.
  */
-static LEX_RULES: [&'static str; 14] = [
+static LEX_RULES: [&'static str; 15] = [
     r##########"^\("##########,
     r##########"^\)"##########,
     r##########"^\s+"##########,
@@ -37,6 +37,7 @@ static LEX_RULES: [&'static str; 14] = [
     r##########"^if"##########,
     r##########"^while"##########,
     r##########"^set"##########,
+    r##########"^def"##########,
     r##########"^[=<>]+"##########,
     r##########"^[+\-*/\w]+"##########
 ];
@@ -82,7 +83,7 @@ macro_rules! pop {
  *
  * 0 - encoded non-terminal, 1 - length of RHS to pop from the stack
  */
-static PRODUCTIONS : [[i32; 2]; 17] = [
+static PRODUCTIONS : [[i32; 2]; 18] = [
     [-1, 1],
     [0, 1],
     [0, 1],
@@ -99,7 +100,8 @@ static PRODUCTIONS : [[i32; 2]; 17] = [
     [3, 6],
     [3, 5],
     [3, 5],
-    [3, 5]
+    [3, 5],
+    [3, 6]
 ];
 
 /**
@@ -122,13 +124,13 @@ lazy_static! {
     /**
      * Lexical rules grouped by lexer state (by start condition).
      */
-    static ref LEX_RULES_BY_START_CONDITIONS: HashMap<&'static str, Vec<i32>> = hashmap! { "INITIAL" => vec! [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ] };
+    static ref LEX_RULES_BY_START_CONDITIONS: HashMap<&'static str, Vec<i32>> = hashmap! { "INITIAL" => vec! [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ] };
 
     /**
      * Maps a string name of a token type to its encoded number (the first
      * token number starts after all numbers for non-terminal).
      */
-    static ref TOKENS_MAP: HashMap<&'static str, i32> = hashmap! { "IDENTIFIER" => 4, "NUMBER" => 5, "STRING" => 6, "BOOLEAN" => 7, "NULL" => 8, "BEGIN" => 9, "VAR" => 10, "IF" => 11, "WHILE" => 12, "ASSIGN" => 13, "OPERATOR" => 14, "'('" => 15, "')'" => 16, "$" => 17 };
+    static ref TOKENS_MAP: HashMap<&'static str, i32> = hashmap! { "IDENTIFIER" => 4, "NUMBER" => 5, "STRING" => 6, "BOOLEAN" => 7, "NULL" => 8, "BEGIN" => 9, "VAR" => 10, "IF" => 11, "WHILE" => 12, "ASSIGN" => 13, "OPERATOR" => 14, "FUNCTION" => 15, "'('" => 16, "')'" => 17, "$" => 18 };
 
     /**
      * Parsing table.
@@ -137,44 +139,49 @@ lazy_static! {
      * from an encoded symbol to table entry (TE).
      */
     static ref TABLE: Vec<HashMap<i32, TE>>= vec![
-    hashmap! { 0 => TE::Transit(1), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 17 => TE::Accept },
-    hashmap! { 4 => TE::Reduce(1), 5 => TE::Reduce(1), 6 => TE::Reduce(1), 7 => TE::Reduce(1), 8 => TE::Reduce(1), 15 => TE::Reduce(1), 16 => TE::Reduce(1), 17 => TE::Reduce(1) },
-    hashmap! { 4 => TE::Reduce(2), 5 => TE::Reduce(2), 6 => TE::Reduce(2), 7 => TE::Reduce(2), 8 => TE::Reduce(2), 15 => TE::Reduce(2), 16 => TE::Reduce(2), 17 => TE::Reduce(2) },
-    hashmap! { 4 => TE::Reduce(3), 5 => TE::Reduce(3), 6 => TE::Reduce(3), 7 => TE::Reduce(3), 8 => TE::Reduce(3), 15 => TE::Reduce(3), 16 => TE::Reduce(3), 17 => TE::Reduce(3) },
-    hashmap! { 4 => TE::Reduce(4), 5 => TE::Reduce(4), 6 => TE::Reduce(4), 7 => TE::Reduce(4), 8 => TE::Reduce(4), 15 => TE::Reduce(4), 16 => TE::Reduce(4), 17 => TE::Reduce(4) },
-    hashmap! { 4 => TE::Reduce(5), 5 => TE::Reduce(5), 6 => TE::Reduce(5), 7 => TE::Reduce(5), 8 => TE::Reduce(5), 15 => TE::Reduce(5), 16 => TE::Reduce(5), 17 => TE::Reduce(5) },
-    hashmap! { 4 => TE::Reduce(6), 5 => TE::Reduce(6), 6 => TE::Reduce(6), 7 => TE::Reduce(6), 8 => TE::Reduce(6), 15 => TE::Reduce(6), 16 => TE::Reduce(6), 17 => TE::Reduce(6) },
-    hashmap! { 4 => TE::Reduce(7), 5 => TE::Reduce(7), 6 => TE::Reduce(7), 7 => TE::Reduce(7), 8 => TE::Reduce(7), 15 => TE::Reduce(7), 16 => TE::Reduce(7), 17 => TE::Reduce(7) },
-    hashmap! { 4 => TE::Shift(11), 9 => TE::Shift(10), 10 => TE::Shift(12), 11 => TE::Shift(13), 12 => TE::Shift(14), 13 => TE::Shift(15), 14 => TE::Shift(16) },
-    hashmap! { 2 => TE::Transit(17), 4 => TE::Reduce(9), 5 => TE::Reduce(9), 6 => TE::Reduce(9), 7 => TE::Reduce(9), 8 => TE::Reduce(9), 15 => TE::Reduce(9), 16 => TE::Reduce(9) },
-    hashmap! { 2 => TE::Transit(20), 4 => TE::Reduce(9), 5 => TE::Reduce(9), 6 => TE::Reduce(9), 7 => TE::Reduce(9), 8 => TE::Reduce(9), 15 => TE::Reduce(9), 16 => TE::Reduce(9) },
-    hashmap! { 4 => TE::Shift(22) },
-    hashmap! { 0 => TE::Transit(25), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 0 => TE::Transit(29), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 4 => TE::Shift(32) },
-    hashmap! { 0 => TE::Transit(35), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 0 => TE::Transit(19), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9), 16 => TE::Shift(18) },
-    hashmap! { 4 => TE::Reduce(10), 5 => TE::Reduce(10), 6 => TE::Reduce(10), 7 => TE::Reduce(10), 8 => TE::Reduce(10), 15 => TE::Reduce(10), 16 => TE::Reduce(10), 17 => TE::Reduce(10) },
-    hashmap! { 4 => TE::Reduce(8), 5 => TE::Reduce(8), 6 => TE::Reduce(8), 7 => TE::Reduce(8), 8 => TE::Reduce(8), 15 => TE::Reduce(8), 16 => TE::Reduce(8) },
-    hashmap! { 0 => TE::Transit(19), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9), 16 => TE::Shift(21) },
-    hashmap! { 4 => TE::Reduce(11), 5 => TE::Reduce(11), 6 => TE::Reduce(11), 7 => TE::Reduce(11), 8 => TE::Reduce(11), 15 => TE::Reduce(11), 16 => TE::Reduce(11), 17 => TE::Reduce(11) },
-    hashmap! { 0 => TE::Transit(23), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 16 => TE::Shift(24) },
-    hashmap! { 4 => TE::Reduce(12), 5 => TE::Reduce(12), 6 => TE::Reduce(12), 7 => TE::Reduce(12), 8 => TE::Reduce(12), 15 => TE::Reduce(12), 16 => TE::Reduce(12), 17 => TE::Reduce(12) },
-    hashmap! { 0 => TE::Transit(26), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 0 => TE::Transit(27), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 16 => TE::Shift(28) },
-    hashmap! { 4 => TE::Reduce(13), 5 => TE::Reduce(13), 6 => TE::Reduce(13), 7 => TE::Reduce(13), 8 => TE::Reduce(13), 15 => TE::Reduce(13), 16 => TE::Reduce(13), 17 => TE::Reduce(13) },
-    hashmap! { 0 => TE::Transit(30), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 16 => TE::Shift(31) },
-    hashmap! { 4 => TE::Reduce(14), 5 => TE::Reduce(14), 6 => TE::Reduce(14), 7 => TE::Reduce(14), 8 => TE::Reduce(14), 15 => TE::Reduce(14), 16 => TE::Reduce(14), 17 => TE::Reduce(14) },
-    hashmap! { 0 => TE::Transit(33), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 16 => TE::Shift(34) },
-    hashmap! { 4 => TE::Reduce(15), 5 => TE::Reduce(15), 6 => TE::Reduce(15), 7 => TE::Reduce(15), 8 => TE::Reduce(15), 15 => TE::Reduce(15), 16 => TE::Reduce(15), 17 => TE::Reduce(15) },
-    hashmap! { 0 => TE::Transit(36), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 15 => TE::Shift(9) },
-    hashmap! { 16 => TE::Shift(37) },
-    hashmap! { 4 => TE::Reduce(16), 5 => TE::Reduce(16), 6 => TE::Reduce(16), 7 => TE::Reduce(16), 8 => TE::Reduce(16), 15 => TE::Reduce(16), 16 => TE::Reduce(16), 17 => TE::Reduce(16) }
+    hashmap! { 0 => TE::Transit(1), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 16 => TE::Shift(9) },
+    hashmap! { 18 => TE::Accept },
+    hashmap! { 4 => TE::Reduce(1), 5 => TE::Reduce(1), 6 => TE::Reduce(1), 7 => TE::Reduce(1), 8 => TE::Reduce(1), 16 => TE::Reduce(1), 17 => TE::Reduce(1), 18 => TE::Reduce(1) },
+    hashmap! { 4 => TE::Reduce(2), 5 => TE::Reduce(2), 6 => TE::Reduce(2), 7 => TE::Reduce(2), 8 => TE::Reduce(2), 16 => TE::Reduce(2), 17 => TE::Reduce(2), 18 => TE::Reduce(2) },
+    hashmap! { 4 => TE::Reduce(3), 5 => TE::Reduce(3), 6 => TE::Reduce(3), 7 => TE::Reduce(3), 8 => TE::Reduce(3), 16 => TE::Reduce(3), 17 => TE::Reduce(3), 18 => TE::Reduce(3) },
+    hashmap! { 4 => TE::Reduce(4), 5 => TE::Reduce(4), 6 => TE::Reduce(4), 7 => TE::Reduce(4), 8 => TE::Reduce(4), 16 => TE::Reduce(4), 17 => TE::Reduce(4), 18 => TE::Reduce(4) },
+    hashmap! { 4 => TE::Reduce(5), 5 => TE::Reduce(5), 6 => TE::Reduce(5), 7 => TE::Reduce(5), 8 => TE::Reduce(5), 16 => TE::Reduce(5), 17 => TE::Reduce(5), 18 => TE::Reduce(5) },
+    hashmap! { 4 => TE::Reduce(6), 5 => TE::Reduce(6), 6 => TE::Reduce(6), 7 => TE::Reduce(6), 8 => TE::Reduce(6), 16 => TE::Reduce(6), 17 => TE::Reduce(6), 18 => TE::Reduce(6) },
+    hashmap! { 4 => TE::Reduce(7), 5 => TE::Reduce(7), 6 => TE::Reduce(7), 7 => TE::Reduce(7), 8 => TE::Reduce(7), 16 => TE::Reduce(7), 17 => TE::Reduce(7), 18 => TE::Reduce(7) },
+    hashmap! { 4 => TE::Shift(11), 9 => TE::Shift(10), 10 => TE::Shift(12), 11 => TE::Shift(13), 12 => TE::Shift(14), 13 => TE::Shift(15), 14 => TE::Shift(16), 15 => TE::Shift(17) },
+    hashmap! { 2 => TE::Transit(18), 4 => TE::Reduce(9), 5 => TE::Reduce(9), 6 => TE::Reduce(9), 7 => TE::Reduce(9), 8 => TE::Reduce(9), 16 => TE::Reduce(9), 17 => TE::Reduce(9) },
+    hashmap! { 2 => TE::Transit(21), 4 => TE::Reduce(9), 5 => TE::Reduce(9), 6 => TE::Reduce(9), 7 => TE::Reduce(9), 8 => TE::Reduce(9), 16 => TE::Reduce(9), 17 => TE::Reduce(9) },
+    hashmap! { 4 => TE::Shift(23) },
+    hashmap! { 0 => TE::Transit(26), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 16 => TE::Shift(9) },
+    hashmap! { 0 => TE::Transit(30), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 16 => TE::Shift(9) },
+    hashmap! { 4 => TE::Shift(33) },
+    hashmap! { 0 => TE::Transit(36), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 16 => TE::Shift(9) },
+    hashmap! { 4 => TE::Shift(39) },
+    hashmap! { 0 => TE::Transit(20), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 16 => TE::Shift(9), 17 => TE::Shift(19) },
+    hashmap! { 4 => TE::Reduce(10), 5 => TE::Reduce(10), 6 => TE::Reduce(10), 7 => TE::Reduce(10), 8 => TE::Reduce(10), 16 => TE::Reduce(10), 17 => TE::Reduce(10), 18 => TE::Reduce(10) },
+    hashmap! { 4 => TE::Reduce(8), 5 => TE::Reduce(8), 6 => TE::Reduce(8), 7 => TE::Reduce(8), 8 => TE::Reduce(8), 16 => TE::Reduce(8), 17 => TE::Reduce(8) },
+    hashmap! { 0 => TE::Transit(20), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 16 => TE::Shift(9), 17 => TE::Shift(22) },
+    hashmap! { 4 => TE::Reduce(11), 5 => TE::Reduce(11), 6 => TE::Reduce(11), 7 => TE::Reduce(11), 8 => TE::Reduce(11), 16 => TE::Reduce(11), 17 => TE::Reduce(11), 18 => TE::Reduce(11) },
+    hashmap! { 0 => TE::Transit(24), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 16 => TE::Shift(9) },
+    hashmap! { 17 => TE::Shift(25) },
+    hashmap! { 4 => TE::Reduce(12), 5 => TE::Reduce(12), 6 => TE::Reduce(12), 7 => TE::Reduce(12), 8 => TE::Reduce(12), 16 => TE::Reduce(12), 17 => TE::Reduce(12), 18 => TE::Reduce(12) },
+    hashmap! { 0 => TE::Transit(27), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 16 => TE::Shift(9) },
+    hashmap! { 0 => TE::Transit(28), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 16 => TE::Shift(9) },
+    hashmap! { 17 => TE::Shift(29) },
+    hashmap! { 4 => TE::Reduce(13), 5 => TE::Reduce(13), 6 => TE::Reduce(13), 7 => TE::Reduce(13), 8 => TE::Reduce(13), 16 => TE::Reduce(13), 17 => TE::Reduce(13), 18 => TE::Reduce(13) },
+    hashmap! { 0 => TE::Transit(31), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 16 => TE::Shift(9) },
+    hashmap! { 17 => TE::Shift(32) },
+    hashmap! { 4 => TE::Reduce(14), 5 => TE::Reduce(14), 6 => TE::Reduce(14), 7 => TE::Reduce(14), 8 => TE::Reduce(14), 16 => TE::Reduce(14), 17 => TE::Reduce(14), 18 => TE::Reduce(14) },
+    hashmap! { 0 => TE::Transit(34), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 16 => TE::Shift(9) },
+    hashmap! { 17 => TE::Shift(35) },
+    hashmap! { 4 => TE::Reduce(15), 5 => TE::Reduce(15), 6 => TE::Reduce(15), 7 => TE::Reduce(15), 8 => TE::Reduce(15), 16 => TE::Reduce(15), 17 => TE::Reduce(15), 18 => TE::Reduce(15) },
+    hashmap! { 0 => TE::Transit(37), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 16 => TE::Shift(9) },
+    hashmap! { 17 => TE::Shift(38) },
+    hashmap! { 4 => TE::Reduce(16), 5 => TE::Reduce(16), 6 => TE::Reduce(16), 7 => TE::Reduce(16), 8 => TE::Reduce(16), 16 => TE::Reduce(16), 17 => TE::Reduce(16), 18 => TE::Reduce(16) },
+    hashmap! { 2 => TE::Transit(40), 4 => TE::Reduce(9), 5 => TE::Reduce(9), 6 => TE::Reduce(9), 7 => TE::Reduce(9), 8 => TE::Reduce(9), 16 => TE::Reduce(9) },
+    hashmap! { 0 => TE::Transit(41), 1 => TE::Transit(2), 3 => TE::Transit(4), 4 => TE::Shift(3), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(8), 16 => TE::Shift(9) },
+    hashmap! { 4 => TE::Reduce(8), 5 => TE::Reduce(8), 6 => TE::Reduce(8), 7 => TE::Reduce(8), 8 => TE::Reduce(8), 16 => TE::Reduce(8), 17 => TE::Shift(42) },
+    hashmap! { 4 => TE::Reduce(17), 5 => TE::Reduce(17), 6 => TE::Reduce(17), 7 => TE::Reduce(17), 8 => TE::Reduce(17), 16 => TE::Reduce(17), 17 => TE::Reduce(17), 18 => TE::Reduce(17) }
 ];
 }
 
@@ -198,6 +205,7 @@ lazy_static! {
 
 use std::sync::Arc;
 use core::fmt::Debug;
+// use environment::Environment;
 
 #[derive(Debug,PartialEq,Clone)]
 pub enum Expr {
@@ -209,46 +217,8 @@ pub enum Expr {
   Assignment(String, Box<Expr>),
   IfExpression(Box<Expr>, Box<Expr>, Box<Expr>),
   WhileStatement(Box<Expr>, Box<Expr>),
-  CallExpression(String, Vec<Expr>)
-}
-
-pub struct Func {
-  func: Arc<dyn Fn(Vec<Value>) -> Result<Value, String>> // TODO
-}
-
-impl Func {
-  pub fn new<F>(f: F) -> Self 
-  where 
-    F: Fn(Vec<Value>) -> Result<Value, String> + 'static
-  {
-    Func {
-      func: Arc::new(f)
-    }
-  }
-
-  pub fn call(&self, args: Vec<Value>) -> Result<Value, String> {
-    (self.func)(args)
-  }
-}
-
-impl PartialEq for Func {
-  fn eq(&self, _: &Self) -> bool {
-      false
-  }
-}
-
-impl Debug for Func {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-      write!(f, "Function")
-  }
-}
-
-impl Clone for Func {
-  fn clone(&self) -> Self {
-    Func {
-        func: Arc::clone(&self.func)
-    }
-  }
+  CallExpression(String, Vec<Expr>),
+  FunctionDeclaration(String, Vec<Expr>, Box<Expr>)
 }
 
 #[derive(Debug,PartialEq,Clone)]
@@ -352,7 +322,7 @@ struct Tokenizer<'t> {
      */
     yybuffer: Vec<String>,
 
-    handlers: [fn(&mut Tokenizer<'t>) -> &'static str; 14],
+    handlers: [fn(&mut Tokenizer<'t>) -> &'static str; 15],
 }
 
 impl<'t> Tokenizer<'t> {
@@ -400,7 +370,8 @@ impl<'t> Tokenizer<'t> {
     Tokenizer::_lex_rule10,
     Tokenizer::_lex_rule11,
     Tokenizer::_lex_rule12,
-    Tokenizer::_lex_rule13
+    Tokenizer::_lex_rule13,
+    Tokenizer::_lex_rule14
 ],
         };
 
@@ -679,10 +650,14 @@ return "ASSIGN"
 }
 
 fn _lex_rule12(&mut self) -> &'static str {
-return "OPERATOR"
+return "FUNCTION"
 }
 
 fn _lex_rule13(&mut self) -> &'static str {
+return "OPERATOR"
+}
+
+fn _lex_rule14(&mut self) -> &'static str {
 return "IDENTIFIER"
 }
 }
@@ -713,7 +688,7 @@ pub struct Parser<'t> {
     /**
      * Semantic action handlers.
      */
-    handlers: [fn(&mut Parser<'t>) -> SV; 17],
+    handlers: [fn(&mut Parser<'t>) -> SV; 18],
 }
 
 impl<'t> Parser<'t> {
@@ -745,7 +720,8 @@ impl<'t> Parser<'t> {
     Parser::_handler13,
     Parser::_handler14,
     Parser::_handler15,
-    Parser::_handler16
+    Parser::_handler16,
+    Parser::_handler17
 ],
         }
     }
@@ -1021,6 +997,19 @@ let mut _2 = pop!(self.values_stack, _0);
 self.values_stack.pop();
 
 let __ = Expr::BinaryExpression(_2.value.to_string(), Box::new(_3), Box::new(_4));
+SV::_2(__)
+}
+
+fn _handler17(&mut self) -> SV {
+// Semantic values prologue.
+self.values_stack.pop();
+let mut _5 = pop!(self.values_stack, _2);
+let mut _4 = pop!(self.values_stack, _3);
+let mut _3 = pop!(self.values_stack, _0);
+self.values_stack.pop();
+self.values_stack.pop();
+
+let __ = Expr::FunctionDeclaration(_3.value.to_string(), _4, Box::new(_5));
 SV::_2(__)
 }
 }

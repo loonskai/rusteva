@@ -1,7 +1,6 @@
-use std::{cell::RefCell, fmt::Debug, rc::Rc};
-use syntax::{Expr, Func, Value};
+use std::{cell::RefCell, collections::HashMap, fmt::Debug, rc::Rc};
+use common::{Func, environment::Environment, Expr , Value};
 use unicode_segmentation::{self, UnicodeSegmentation};
-use crate::environment::Environment;
 
 #[derive(Debug)]
 pub struct Eva {
@@ -67,122 +66,129 @@ impl Eva {
   pub fn eval(&mut self, exp: Expr, current_env: Option<Rc<RefCell<Environment>>>) -> Option<Value> {
     let env = current_env.map_or(Rc::clone(&self.global), |e| e);
     match exp {
-        Expr::Literal(value) => {
-          match value {
-            Value::Int(n) => Some(Value::Int(n)),
-            Value::Str(s) => {
-              if s.graphemes(true).nth(0).unwrap() == r#"""# && s.graphemes(true).last().unwrap() == r#"""# {
-                let with_quotation_trimmed = s[1..s.len()-1].to_string();
-                return Some(Value::Str(with_quotation_trimmed));
-              }
-              return None
-            },
-            Value::Boolean(b) => Some(Value::Boolean(b)),
-            Value::Function(f) => Some(Value::Function(f)),
-            Value::Null => None
+      Expr::Literal(value) => {
+        match value {
+          Value::Int(n) => Some(Value::Int(n)),
+          Value::Str(s) => {
+            if s.graphemes(true).nth(0).unwrap() == r#"""# && s.graphemes(true).last().unwrap() == r#"""# {
+              let with_quotation_trimmed = s[1..s.len()-1].to_string();
+              return Some(Value::Str(with_quotation_trimmed));
+            }
+            return None
+          },
+          Value::Boolean(b) => Some(Value::Boolean(b)),
+          Value::Function(f) => Some(Value::Function(f)),
+          Value::Null => None
+        }
+      }
+      Expr::BinaryExpression(operator, exp1,exp2 ) => {
+        let v1 = self.eval(*exp1, Some(Rc::clone(&env))).expect("Invalid operand");
+        let v2 = self.eval(*exp2, Some(Rc::clone(&env))).expect("Invalid operand");
+        match (v1, v2) {
+          (Value::Int(n1), Value::Int(n2)) => {
+            if matches!(operator.as_str(), ">" | "<" | ">=" | "<=" | "==") {
+              let result = match operator.as_str() {
+                ">" => n1 > n2,
+                "<" => n1 < n2,
+                ">=" => n1 >= n2,
+                "<=" => n1 <= n2,
+                "==" => n1 == n2,
+                _ => panic!("Unknown operator")
+              };
+              return Some(Value::Boolean(result));
+            } else {
+              panic!("Invalid operator")
+            }
+          }
+          _ => None,
+        }
+      }
+      Expr::VariableDeclaration(id_name, exp) => {
+        if let Some(value) = self.eval(*exp, Some(Rc::clone(&env))) {
+          if let Ok(result) = env.borrow_mut().define(&id_name, value) {
+            return Some(result.clone())
           }
         }
-        Expr::BinaryExpression(operator, exp1,exp2 ) => {
-          let v1 = self.eval(*exp1, Some(Rc::clone(&env))).expect("Invalid operand");
-          let v2 = self.eval(*exp2, Some(Rc::clone(&env))).expect("Invalid operand");
-          match (v1, v2) {
-            (Value::Int(n1), Value::Int(n2)) => {
-              if matches!(operator.as_str(), ">" | "<" | ">=" | "<=" | "==") {
-                let result = match operator.as_str() {
-                  ">" => n1 > n2,
-                  "<" => n1 < n2,
-                  ">=" => n1 >= n2,
-                  "<=" => n1 <= n2,
-                  "==" => n1 == n2,
-                  _ => panic!("Unknown operator")
-                };
-                return Some(Value::Boolean(result));
-              } else {
-                panic!("Invalid operator")
-              }
-            }
-            _ => None,
+        panic!("Unable to declare variable")
+      }
+      Expr::Identifier(id) => {
+        // TODO: Check for reserved words
+        match env.borrow().lookup(&id) {
+          Ok(value) => Some(value.clone()),
+          Err(err) => panic!("{:?}", err)
+        }
+      },
+      Expr::BlockStatement(expressions) => {
+        let block_env = Environment::new(Some(env)); // BROKEN - we must not clone the parent env
+        self.eval_block(expressions, Rc::new(RefCell::new(block_env)))
+      },
+      Expr::Assignment(id, expr) => {
+        let result = self.eval(*expr, Some(Rc::clone(&env))).map_or(Value::Null, |value| value);
+        let _ = env.borrow_mut().set(&id, result.clone());
+        Some(result)
+      },
+      Expr::IfExpression(condition_expr, consequent_expr, alternate_exp) => {
+        let result = self.eval(*condition_expr, Some(Rc::clone(&env)));
+        if let Some(cond) = result {
+          match cond {
+              Value::Boolean(value) => {
+                if value {
+                  return self.eval(*consequent_expr, Some(Rc::clone(&env)));
+                } else {
+                  return self.eval(*alternate_exp, Some(Rc::clone(&env)));
+                }
+              },
+              _ => panic!("Condition expression must return boolean")
           }
         }
-        Expr::VariableDeclaration(id_name, exp) => {
-          if let Some(value) = self.eval(*exp, Some(Rc::clone(&env))) {
-            if let Ok(result) = env.borrow_mut().define(&id_name, value) {
-              return Some(result.clone())
-            }
+        None
+      },
+      Expr::WhileStatement(condition_expr, consequent_expr) => {
+        let condition = *condition_expr;
+        let consequent = *consequent_expr;
+        let mut condition_result = self.eval(condition.clone(), Some(Rc::clone(&env))); // 1
+        let mut consequent_result = None;
+        while let Some(true) = condition_result.as_ref().map(|v| {
+          match v {
+              Value::Boolean(bool_result) => bool_result,
+              _ => panic!("While condition must return boolean")
           }
-          panic!("Unable to declare variable")
+        }) {
+          // Q: Why the order of both evals matters?
+          consequent_result = self.eval(consequent.clone(), Some(Rc::clone(&env)));
+          condition_result = self.eval(condition.clone(), Some(Rc::clone(&env)));
         }
-        Expr::Identifier(id) => {
-          // TODO: Check for reserved words
-          match env.borrow().lookup(&id) {
-            Ok(value) => Some(value.clone()),
-            Err(err) => panic!("{:?}", err)
+        return consequent_result;
+      },
+      Expr::CallExpression(func_name, func_obj) => {
+        // Lookup the function by name
+        let func_definition = self.eval(Expr::Identifier(func_name.clone()), Some(Rc::clone(&env))).map(|v| {
+          match v {
+            Value::Function(f) => f,
+            _ => panic!("Invalid function format: {}", func_name),
           }
-        },
-        Expr::BlockStatement(expressions) => {
-          let block_env = Environment::new(Some(env)); // BROKEN - we must not clone the parent env
-          self.eval_block(expressions, Rc::new(RefCell::new(block_env)))
-        },
-        Expr::Assignment(id, expr) => {
-          let result = self.eval(*expr, Some(Rc::clone(&env))).map_or(Value::Null, |value| value);
-          let _ = env.borrow_mut().set(&id, result.clone());
-          Some(result)
-        },
-        Expr::IfExpression(condition_expr, consequent_expr, alternate_exp) => {
-          let result = self.eval(*condition_expr, Some(Rc::clone(&env)));
-          if let Some(cond) = result {
-            match cond {
-                Value::Boolean(value) => {
-                  if value {
-                    return self.eval(*consequent_expr, Some(Rc::clone(&env)));
-                  } else {
-                    return self.eval(*alternate_exp, Some(Rc::clone(&env)));
-                  }
-                },
-                _ => panic!("Condition expression must return boolean")
+        });
+        let activation_env = Environment::new(func_obj.env);
+        return match func_definition {
+          Some(func) => {
+            let values = args.iter().map(|exp| self.eval(exp.clone(), Some(Rc::clone(&env))).expect("Unable to evaluate arguments")).collect();
+            match func.call(values) {
+                Ok(v) =>  Some(v),
+                Err(message) => panic!("{}", message)
             }
-          }
-          None
-        },
-        Expr::WhileStatement(condition_expr, consequent_expr) => {
-          // if keyword != "while" {
-          //   panic!("Invalid while statement");
-          // }
-          let condition = *condition_expr;
-          let consequent = *consequent_expr;
-          let mut condition_result = self.eval(condition.clone(), Some(Rc::clone(&env))); // 1
-          let mut consequent_result = None;
-          while let Some(true) = condition_result.as_ref().map(|v| {
-            match v {
-                Value::Boolean(bool_result) => bool_result,
-                _ => panic!("While condition must return boolean")
-            }
-          }) {
-            // Q: Why the order of both evals matters?
-            consequent_result = self.eval(consequent.clone(), Some(Rc::clone(&env)));
-            condition_result = self.eval(condition.clone(), Some(Rc::clone(&env)));
-          }
-          return consequent_result;
-        },
-        Expr::CallExpression(func_name, args) => {
-          // Lookup the function by name
-          let func_definition = self.eval(Expr::Identifier(func_name.clone()), Some(Rc::clone(&env))).map(|v| {
-            match v {
-              Value::Function(f) => f,
-              _ => panic!("Invalid function format: {}", func_name),
-            }
-          });
-          return match func_definition {
-            Some(func) => {
-              let values = args.iter().map(|exp| self.eval(exp.clone(), Some(Rc::clone(&env))).expect("Unable to evaluate arguments")).collect();
-              match func.call(values) {
-                  Ok(v) =>  Some(v),
-                  Err(message) => panic!("{}", message)
-              }
-            },
-            None => None
-          }
+          },
+          None => None
         }
+      },
+      Expr::FunctionDeclaration(func_name, params, body) => {
+        let func_object = HashMap::from([
+          ("params", params),
+          ("body", body),
+          ("env", Rc::clone(&env)) // Closure
+        ]);
+        env.borrow().define(&func_name,  Value::Function(Func::new()));
+        return None
+      },
     }
   }
 
@@ -463,4 +469,18 @@ mod tests {
     )
   }
 
+  #[test]
+  fn function_declaration() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
+
+    assert_eq!(eva.eval(parser.parse("
+      (begin 
+        (def square (x) (* x x))
+        (square 2)
+      )
+      "), None),
+      Some(Value::Int(2))
+    );
+  }
 }

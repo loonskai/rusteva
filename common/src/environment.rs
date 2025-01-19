@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::cell::RefCell;
-use syntax::Value;
 
 use crate::error::RuntimeError;
+use crate::Value;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Environment {
   record: HashMap<String, Value>,
   parent: Option<Rc<RefCell<Environment>>>
@@ -54,8 +54,7 @@ impl Environment {
 
 #[cfg(test)]
 mod tests {
-    use syntax::Value;
-    use super::Environment;
+    use super::*;
 
     #[test]
     fn define_and_lookup() {

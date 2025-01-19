@@ -1,9 +1,8 @@
 [package]
-name = "syntax"
+name = "interpreter"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-onig = "4"
-lazy_static = "1"
+unicode-segmentation = "1.10.1"
 common = { path = "../common" }
