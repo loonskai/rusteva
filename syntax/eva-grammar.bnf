@@ -16,6 +16,7 @@
 'while'            return "WHILE"
 'set'              return "ASSIGN"
 'def'              return "FUNCTION"
+'lambda'           return "LAMBDA"
 [+\-*/=<>]+        return "OPERATOR"
 [\w]+              return "IDENTIFIER"
 
@@ -127,6 +128,10 @@ SExpr
   | '(' FUNCTION IDENTIFIER ParametersList Expression ')' {
     |$3: Token, $4: Vec<Value>, $5: Expr| -> Expr;
     $$ = Expr::FunctionDeclaration($3.value.to_string(), $4, Box::new($5))
+  }
+  | '(' LAMBDA ParametersList Expression ')' {
+    |$3: Vec<Value>, $4: Expr| -> Expr;
+    $$ = Expr::LambdaExpression($3, Box::new($4))
   }
   ;
 

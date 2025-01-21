@@ -187,9 +187,19 @@ impl Eva {
           body,
            Rc::clone(&env), // Closure
         );
-        let _ = env.borrow_mut().define(&func_name,  Value::Function(func_object));
-        None
+        match env.borrow_mut().define(&func_name,  Value::Function(func_object)) {
+          Ok(value) => Some(value.clone()),
+          Err(err) => panic!("{:?}", err)
+        }
       },
+      Expr::LambdaExpression(params, body) => {
+        let func_obj = FuncObj::new(
+          params,
+          body,
+          Rc::clone(&env),
+        );
+        Some(Value::Function(func_obj))
+      }
     }
   }
 
@@ -514,5 +524,24 @@ mod tests {
       "), None),
       Some(Value::Int(160))
     );
+  }
+
+  #[test]
+  fn lambda_functions() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
+
+    assert_eq!(eva.eval(parser.parse("
+      (begin
+        (def onClick (callback) 
+          (begin
+            (var x 10)
+            (var y 20)
+            (callback (+ x y))
+          )
+        )
+        (onClick (lambda (data) (* data 10)))
+      )
+    "), None), Some(Value::Int(300)))
   }
 }
