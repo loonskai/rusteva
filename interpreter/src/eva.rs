@@ -181,6 +181,28 @@ impl Eva {
         }
         self.eval(*func_obj.body, Some(Rc::new(RefCell::new(activation_env))))
       },
+      Expr::ApplyExpression(func_expr, args) => {
+        let func_obj = self.eval(*func_expr, Some(Rc::clone(&env))).map(|v| {
+          match v {
+            Value::Function(f) => f,
+            _ => panic!("Invalid function call"),
+          }
+        }).expect("Expected a function");
+        if args.len() != func_obj.params.len() {
+          panic!("Function arguments mismatch!");
+        }
+        let mut activation_env = Environment::new(Some(func_obj.env));
+        for param in func_obj.params.into_iter().enumerate() {
+          match &param {
+            (index, Value::Str(param_name)) => {
+              let evaluated_arg = self.eval(args[*index].clone(), Some(Rc::clone(&env))).expect("Unable to evaluate argument");
+              activation_env.define(param_name, evaluated_arg).unwrap();
+            },
+            _ => panic!("Invalid function parameter format")
+          }
+        }
+        self.eval(*func_obj.body, Some(Rc::new(RefCell::new(activation_env))))
+      },
       Expr::FunctionDeclaration(func_name, params, body) => {
         let func_object = FuncObj::new(
           params,
@@ -210,7 +232,6 @@ impl Eva {
     }
     result
   }
-
 }
 
 #[cfg(test)]
@@ -543,5 +564,13 @@ mod tests {
         (onClick (lambda (data) (* data 10)))
       )
     "), None), Some(Value::Int(300)))
+  }
+
+  #[test]
+  fn immediately_invoked_lambda_expression() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
+
+    assert_eq!(eva.eval(parser.parse("((lambda (x) (* x x)) 2)"), None), Some(Value::Int(4)));
   }
 }

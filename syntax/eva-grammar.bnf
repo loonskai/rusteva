@@ -97,13 +97,13 @@ Parameters
   ;
 
 SExpr
-  : '(' BEGIN ExpressionsList ')' {
-    |$3: Vec<Expr>| -> Expr;
-    $$ = Expr::BlockStatement($3)
-  }
-  | '(' IDENTIFIER ExpressionsList ')' {
+  : '(' IDENTIFIER ExpressionsList ')' {
     |$2: Token, $3: Vec<Expr>| -> Expr;
     $$ = Expr::CallExpression($2.value.to_string(), $3)
+  }
+  | '(' BEGIN ExpressionsList ')' {
+    |$3: Vec<Expr>| -> Expr;
+    $$ = Expr::BlockStatement($3)
   }
   | '(' VAR IDENTIFIER Expression ')' {
     |$3: Token, $4: Expr| -> Expr;
@@ -132,6 +132,10 @@ SExpr
   | '(' LAMBDA ParametersList Expression ')' {
     |$3: Vec<Value>, $4: Expr| -> Expr;
     $$ = Expr::LambdaExpression($3, Box::new($4))
+  }
+  | '(' '(' LAMBDA ParametersList Expression ')' Expression ')' {
+    |$4: Vec<Value>, $5: Expr, $7: Expr| -> Expr;
+    $$ = Expr::ApplyExpression(Box::new(Expr::LambdaExpression($4, Box::new($5))), vec![$7])
   }
   ;
 
