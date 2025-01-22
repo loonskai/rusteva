@@ -204,15 +204,12 @@ impl Eva {
         self.eval(*func_obj.body, Some(Rc::new(RefCell::new(activation_env))))
       },
       Expr::FunctionDeclaration(func_name, params, body) => {
-        let func_object = FuncObj::new(
-          params,
-          body,
-           Rc::clone(&env), // Closure
-        );
-        match env.borrow_mut().define(&func_name,  Value::Function(func_object)) {
-          Ok(value) => Some(value.clone()),
-          Err(err) => panic!("{:?}", err)
-        }
+        // JIT-transpile to a variable declaration
+        let var_expr = Expr::VariableDeclaration(func_name, Box::new(Expr::LambdaExpression(params, body)));
+        self.eval(
+          var_expr,
+          Some(Rc::clone(&env)) // Closure
+        )
       },
       Expr::LambdaExpression(params, body) => {
         let func_obj = FuncObj::new(
@@ -572,5 +569,18 @@ mod tests {
     let mut parser = Parser::new();
 
     assert_eq!(eva.eval(parser.parse("((lambda (x) (* x x)) 2)"), None), Some(Value::Int(4)));
+  }
+
+  #[test]
+  fn lambda_assignment() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
+
+    assert_eq!(eva.eval(parser.parse("
+      (begin
+        (var square (lambda (x) (* x x)))
+        (square 2)
+      )
+    "), None), Some(Value::Int(4)));
   }
 }
