@@ -28,27 +28,29 @@ macro_rules! define_binary_operators {
 
 #[derive(Debug)]
 pub struct Eva {
-  pub global: Rc<RefCell<Environment>>
+  pub global_env: Rc<RefCell<Environment>>,
+  pub execution_stack: Vec<Rc<Environment>>
 }
 
 impl Eva {
   // Create global environment
   // Predefined values: null, true, false, math operations
   pub fn new() -> Self {
-    let global = Rc::new(RefCell::new(Environment::new(None)));
+    let global_env = Rc::new(RefCell::new(Environment::new(None)));
     define_global_variables!(
-      global, 
+      global_env, 
       ("null", Value::Null), 
       ("true", Value::Boolean(true)), 
       ("false", Value::Boolean(false))
     );
-    define_binary_operators!(global, "+", "-", "*", "/");
+    define_binary_operators!(global_env, "+", "-", "*", "/");
+    let mut execution_stack: Vec<Rc<Environment>> = vec![];
 
-    Eva { global }
+    Eva { global_env, execution_stack }
   }
 
   pub fn eval(&mut self, exp: Expr, current_env: Option<Rc<RefCell<Environment>>>) -> Option<Value> {
-    let env = current_env.map_or(Rc::clone(&self.global), |e| e);
+    let env = current_env.map_or(Rc::clone(&self.global_env), |e| e);
     match exp {
       Expr::Literal(value) => {
         match value {
@@ -159,49 +161,10 @@ impl Eva {
         return consequent_result;
       },
       Expr::CallExpression(func_name, args) => {
-        // Lookup the function by name
-        let func_obj = self.eval(Expr::Identifier(func_name.clone()), Some(Rc::clone(&env))).map(|v| {
-          match v {
-            Value::Function(f) => f,
-            _ => panic!("Invalid function format: {}", func_name),
-          }
-        }).expect("Function not found");
-        if args.len() != func_obj.params.len() {
-          panic!("Function arguments mismatch!")
-        }
-        let mut activation_env = Environment::new(Some(func_obj.env));
-        for param in func_obj.params.into_iter().enumerate() {
-          match &param {
-            (index, Value::Str(param_name)) => {
-              let evaluated_arg = self.eval(args[*index].clone(), Some(Rc::clone(&env))).expect("Unable to evaluate argument");
-              let _ = activation_env.define(param_name, evaluated_arg);
-            },
-            _ => panic!("Invalid function parameter format")
-          }
-        }
-        self.eval(*func_obj.body, Some(Rc::new(RefCell::new(activation_env))))
+        self.apply(Expr::Identifier(func_name.clone()), args, Rc::clone(&env))
       },
       Expr::ApplyExpression(func_expr, args) => {
-        let func_obj = self.eval(*func_expr, Some(Rc::clone(&env))).map(|v| {
-          match v {
-            Value::Function(f) => f,
-            _ => panic!("Invalid function call"),
-          }
-        }).expect("Expected a function");
-        if args.len() != func_obj.params.len() {
-          panic!("Function arguments mismatch!");
-        }
-        let mut activation_env = Environment::new(Some(func_obj.env));
-        for param in func_obj.params.into_iter().enumerate() {
-          match &param {
-            (index, Value::Str(param_name)) => {
-              let evaluated_arg = self.eval(args[*index].clone(), Some(Rc::clone(&env))).expect("Unable to evaluate argument");
-              activation_env.define(param_name, evaluated_arg).unwrap();
-            },
-            _ => panic!("Invalid function parameter format")
-          }
-        }
-        self.eval(*func_obj.body, Some(Rc::new(RefCell::new(activation_env))))
+        self.apply(*func_expr, args, Rc::clone(&env))
       },
       Expr::FunctionDeclaration(func_name, params, body) => {
         // JIT-transpile to a variable declaration
@@ -220,6 +183,29 @@ impl Eva {
         Some(Value::Function(func_obj))
       }
     }
+  }
+
+  fn apply(&mut self, expr: Expr, args: Vec<Expr>, env: Rc<RefCell<Environment>>) -> Option<Value> {
+    let func_obj = self.eval(expr, Some(Rc::clone(&env))).map(|v| {
+      match v {
+        Value::Function(f) => f,
+        _ => panic!("Invalid function call"),
+      }
+    }).expect("Expected a function");
+    if args.len() != func_obj.params.len() {
+      panic!("Function arguments mismatch!")
+    }
+    let mut activation_env = Environment::new(Some(func_obj.env));
+    for param in func_obj.params.into_iter().enumerate() {
+      match &param {
+        (index, Value::Str(param_name)) => {
+          let evaluated_arg = self.eval(args[*index].clone(), Some(Rc::clone(&env))).expect("Unable to evaluate argument");
+          let _ = activation_env.define(param_name, evaluated_arg);
+        },
+        _ => panic!("Invalid function parameter format")
+      }
+    }
+    self.eval(*func_obj.body, Some(Rc::new(RefCell::new(activation_env))))
   }
 
   fn eval_block(&mut self, expressions: Vec<Expr>, env: Rc<RefCell<Environment>>) -> Option<Value> {
@@ -242,19 +228,19 @@ mod tests {
 
     assert!(
       matches!(
-        eva.global.borrow().lookup(&"null".to_string()),
+        eva.global_env.borrow().lookup(&"null".to_string()),
         Ok(Value::Null)
       )
     );
     assert!(
       matches!(
-        eva.global.borrow().lookup(&"true".to_string()),
+        eva.global_env.borrow().lookup(&"true".to_string()),
         Ok(Value::Boolean(true))
       )
     );
     assert!(
       matches!(
-        eva.global.borrow().lookup(&"false".to_string()),
+        eva.global_env.borrow().lookup(&"false".to_string()),
         Ok(Value::Boolean(false))
       )
     );
@@ -583,4 +569,31 @@ mod tests {
       )
     "), None), Some(Value::Int(4)));
   }
+
+  #[test]
+  fn recursive_function() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
+
+    assert_eq!(eva.eval(parser.parse("
+      (begin
+        (def factorial (x)
+          (if (== x 1)
+            1
+            (* x (factorial (- x 1)))
+          )
+        )
+        (factorial 5)
+      )
+    "), None), Some(Value::Int(120)))
+  }
+
+  // #[test]
+  // fn execution_stack() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
+  //   let mut global_env = Rc::new(RefCell::new(Environment::new(None)));
+
+  //   eva.eval(parser.parse(""), Some(global_env));
+  // }
 }
