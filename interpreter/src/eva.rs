@@ -29,7 +29,7 @@ macro_rules! define_binary_operators {
 #[derive(Debug)]
 pub struct Eva {
   pub global_env: Rc<RefCell<Environment>>,
-  pub execution_stack: Vec<Rc<Environment>>
+  pub execution_stack: Vec<Rc<RefCell<Environment>>>
 }
 
 impl Eva {
@@ -44,7 +44,7 @@ impl Eva {
       ("false", Value::Boolean(false))
     );
     define_binary_operators!(global_env, "+", "-", "*", "/");
-    let mut execution_stack: Vec<Rc<Environment>> = vec![];
+    let execution_stack: Vec<Rc<RefCell<Environment>>> = vec![];
 
     Eva { global_env, execution_stack }
   }
@@ -195,17 +195,21 @@ impl Eva {
     if args.len() != func_obj.params.len() {
       panic!("Function arguments mismatch!")
     }
-    let mut activation_env = Environment::new(Some(func_obj.env));
+    let activation_env = Rc::new(RefCell::new(Environment::new(Some(func_obj.env))));
+    // TODO: How to implement "debugger" Expr::Breakpoint and test execution stack?
+    self.execution_stack.push(Rc::clone(&activation_env));
     for param in func_obj.params.into_iter().enumerate() {
       match &param {
         (index, Value::Str(param_name)) => {
           let evaluated_arg = self.eval(args[*index].clone(), Some(Rc::clone(&env))).expect("Unable to evaluate argument");
-          let _ = activation_env.define(param_name, evaluated_arg);
+          let _ = activation_env.borrow_mut().define(param_name, evaluated_arg);
         },
         _ => panic!("Invalid function parameter format")
       }
     }
-    self.eval(*func_obj.body, Some(Rc::new(RefCell::new(activation_env))))
+    let result = self.eval(*func_obj.body, Some(Rc::clone(&activation_env)));
+    self.execution_stack.pop();
+    result
   }
 
   fn eval_block(&mut self, expressions: Vec<Expr>, env: Rc<RefCell<Environment>>) -> Option<Value> {
@@ -587,13 +591,4 @@ mod tests {
       )
     "), None), Some(Value::Int(120)))
   }
-
-  // #[test]
-  // fn execution_stack() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
-  //   let mut global_env = Rc::new(RefCell::new(Environment::new(None)));
-
-  //   eva.eval(parser.parse(""), Some(global_env));
-  // }
 }
