@@ -4,6 +4,20 @@ pub mod error;
 use std::{cell::RefCell, rc::Rc};
 use environment::Environment;
 
+#[derive(Debug)]
+pub enum Program {
+    Atom(ParsedExpr),
+    List(Vec<ParsedExpr>)
+}
+
+#[derive(Debug)]
+pub enum ParsedExpr {
+    Number(isize),
+    String(String),
+    Symbol(String),
+    List(Vec<ParsedExpr>)
+}
+
 #[derive(Debug,PartialEq,Clone)]
 pub struct FuncObj {
     pub params: Vec<Value>,
@@ -32,6 +46,7 @@ pub enum Value {
 
 #[derive(Debug,PartialEq,Clone)]
 pub enum Expr {
+    List(Vec<Expr>),
     Literal(Value),
     BinaryExpression(String, Box<Expr>, Box<Expr>),
     VariableDeclaration(String, Box<Expr>),
@@ -44,6 +59,7 @@ pub enum Expr {
     FunctionDeclaration(String, Vec<Value>, Box<Expr>),
     LambdaExpression(Vec<Value>, Box<Expr>),
     ApplyExpression(Box<Expr>, Vec<Expr>),
+    SwitchStatement(Vec<Expr>),
 }
 
 

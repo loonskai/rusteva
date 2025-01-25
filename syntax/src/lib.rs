@@ -16,32 +16,20 @@ use std::collections::HashMap;
 enum SV {
     Undefined,
     _0(Token),
-    _1(Value),
-    _2(Expr),
-    _3(Vec<Expr>),
-    _4(Vec<Value>)
+    _1(ParsedExpr),
+    _2(Vec<ParsedExpr>)
 }
 
 /**
  * Lex rules.
  */
-static LEX_RULES: [&'static str; 16] = [
+static LEX_RULES: [&'static str; 6] = [
     r##########"^\("##########,
     r##########"^\)"##########,
     r##########"^\s+"##########,
     r##########"^"[^\"]*""##########,
     r##########"^[\-]?\d+"##########,
-    r##########"^true|false"##########,
-    r##########"^null"##########,
-    r##########"^begin"##########,
-    r##########"^var"##########,
-    r##########"^if"##########,
-    r##########"^while"##########,
-    r##########"^set"##########,
-    r##########"^def"##########,
-    r##########"^lambda"##########,
-    r##########"^[+\-*/=<>]+"##########,
-    r##########"^[\w]+"##########
+    r##########"^[\w\-+*=<>/]+"##########
 ];
 
 /**
@@ -85,30 +73,16 @@ macro_rules! pop {
  *
  * 0 - encoded non-terminal, 1 - length of RHS to pop from the stack
  */
-static PRODUCTIONS : [[i32; 2]; 23] = [
+static PRODUCTIONS : [[i32; 2]; 9] = [
     [-1, 1],
     [0, 1],
     [0, 1],
-    [0, 1],
     [1, 1],
     [1, 1],
     [1, 1],
-    [1, 1],
-    [2, 2],
-    [2, 0],
-    [3, 3],
-    [4, 2],
-    [4, 0],
-    [5, 4],
-    [5, 4],
-    [5, 5],
-    [5, 6],
-    [5, 5],
-    [5, 5],
-    [5, 5],
-    [5, 6],
-    [5, 5],
-    [5, 8]
+    [2, 3],
+    [3, 2],
+    [3, 0]
 ];
 
 /**
@@ -131,13 +105,13 @@ lazy_static! {
     /**
      * Lexical rules grouped by lexer state (by start condition).
      */
-    static ref LEX_RULES_BY_START_CONDITIONS: HashMap<&'static str, Vec<i32>> = hashmap! { "INITIAL" => vec! [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ] };
+    static ref LEX_RULES_BY_START_CONDITIONS: HashMap<&'static str, Vec<i32>> = hashmap! { "INITIAL" => vec! [ 0, 1, 2, 3, 4, 5 ] };
 
     /**
      * Maps a string name of a token type to its encoded number (the first
      * token number starts after all numbers for non-terminal).
      */
-    static ref TOKENS_MAP: HashMap<&'static str, i32> = hashmap! { "IDENTIFIER" => 6, "NUMBER" => 7, "STRING" => 8, "BOOLEAN" => 9, "NULL" => 10, "BEGIN" => 11, "VAR" => 12, "IF" => 13, "WHILE" => 14, "ASSIGN" => 15, "OPERATOR" => 16, "FUNCTION" => 17, "LAMBDA" => 18, "'('" => 19, "')'" => 20, "$" => 21 };
+    static ref TOKENS_MAP: HashMap<&'static str, i32> = hashmap! { "NUMBER" => 4, "STRING" => 5, "SYMBOL" => 6, "'('" => 7, "')'" => 8, "$" => 9 };
 
     /**
      * Parsing table.
@@ -146,64 +120,17 @@ lazy_static! {
      * from an encoded symbol to table entry (TE).
      */
     static ref TABLE: Vec<HashMap<i32, TE>>= vec![
-    hashmap! { 0 => TE::Transit(1), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9) },
-    hashmap! { 21 => TE::Accept },
-    hashmap! { 6 => TE::Reduce(1), 7 => TE::Reduce(1), 8 => TE::Reduce(1), 9 => TE::Reduce(1), 10 => TE::Reduce(1), 19 => TE::Reduce(1), 20 => TE::Reduce(1), 21 => TE::Reduce(1) },
-    hashmap! { 6 => TE::Reduce(2), 7 => TE::Reduce(2), 8 => TE::Reduce(2), 9 => TE::Reduce(2), 10 => TE::Reduce(2), 19 => TE::Reduce(2), 20 => TE::Reduce(2), 21 => TE::Reduce(2) },
-    hashmap! { 6 => TE::Reduce(3), 7 => TE::Reduce(3), 8 => TE::Reduce(3), 9 => TE::Reduce(3), 10 => TE::Reduce(3), 19 => TE::Reduce(3), 20 => TE::Reduce(3), 21 => TE::Reduce(3) },
-    hashmap! { 6 => TE::Reduce(4), 7 => TE::Reduce(4), 8 => TE::Reduce(4), 9 => TE::Reduce(4), 10 => TE::Reduce(4), 19 => TE::Reduce(4), 20 => TE::Reduce(4), 21 => TE::Reduce(4) },
-    hashmap! { 6 => TE::Reduce(5), 7 => TE::Reduce(5), 8 => TE::Reduce(5), 9 => TE::Reduce(5), 10 => TE::Reduce(5), 19 => TE::Reduce(5), 20 => TE::Reduce(5), 21 => TE::Reduce(5) },
-    hashmap! { 6 => TE::Reduce(6), 7 => TE::Reduce(6), 8 => TE::Reduce(6), 9 => TE::Reduce(6), 10 => TE::Reduce(6), 19 => TE::Reduce(6), 20 => TE::Reduce(6), 21 => TE::Reduce(6) },
-    hashmap! { 6 => TE::Reduce(7), 7 => TE::Reduce(7), 8 => TE::Reduce(7), 9 => TE::Reduce(7), 10 => TE::Reduce(7), 19 => TE::Reduce(7), 20 => TE::Reduce(7), 21 => TE::Reduce(7) },
-    hashmap! { 6 => TE::Shift(10), 11 => TE::Shift(11), 12 => TE::Shift(12), 13 => TE::Shift(13), 14 => TE::Shift(14), 15 => TE::Shift(15), 16 => TE::Shift(16), 17 => TE::Shift(17), 18 => TE::Shift(18), 19 => TE::Shift(19) },
-    hashmap! { 2 => TE::Transit(20), 6 => TE::Reduce(9), 7 => TE::Reduce(9), 8 => TE::Reduce(9), 9 => TE::Reduce(9), 10 => TE::Reduce(9), 19 => TE::Reduce(9), 20 => TE::Reduce(9) },
-    hashmap! { 2 => TE::Transit(23), 6 => TE::Reduce(9), 7 => TE::Reduce(9), 8 => TE::Reduce(9), 9 => TE::Reduce(9), 10 => TE::Reduce(9), 19 => TE::Reduce(9), 20 => TE::Reduce(9) },
-    hashmap! { 6 => TE::Shift(25) },
-    hashmap! { 0 => TE::Transit(28), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9) },
-    hashmap! { 0 => TE::Transit(32), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9) },
-    hashmap! { 6 => TE::Shift(35) },
-    hashmap! { 0 => TE::Transit(38), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9) },
-    hashmap! { 6 => TE::Shift(41) },
-    hashmap! { 3 => TE::Transit(49), 19 => TE::Shift(43) },
-    hashmap! { 18 => TE::Shift(52) },
-    hashmap! { 0 => TE::Transit(22), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9), 20 => TE::Shift(21) },
-    hashmap! { 6 => TE::Reduce(13), 7 => TE::Reduce(13), 8 => TE::Reduce(13), 9 => TE::Reduce(13), 10 => TE::Reduce(13), 19 => TE::Reduce(13), 20 => TE::Reduce(13), 21 => TE::Reduce(13) },
-    hashmap! { 6 => TE::Reduce(8), 7 => TE::Reduce(8), 8 => TE::Reduce(8), 9 => TE::Reduce(8), 10 => TE::Reduce(8), 19 => TE::Reduce(8), 20 => TE::Reduce(8) },
-    hashmap! { 0 => TE::Transit(22), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9), 20 => TE::Shift(24) },
-    hashmap! { 6 => TE::Reduce(14), 7 => TE::Reduce(14), 8 => TE::Reduce(14), 9 => TE::Reduce(14), 10 => TE::Reduce(14), 19 => TE::Reduce(14), 20 => TE::Reduce(14), 21 => TE::Reduce(14) },
-    hashmap! { 0 => TE::Transit(26), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9) },
-    hashmap! { 20 => TE::Shift(27) },
-    hashmap! { 6 => TE::Reduce(15), 7 => TE::Reduce(15), 8 => TE::Reduce(15), 9 => TE::Reduce(15), 10 => TE::Reduce(15), 19 => TE::Reduce(15), 20 => TE::Reduce(15), 21 => TE::Reduce(15) },
-    hashmap! { 0 => TE::Transit(29), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9) },
-    hashmap! { 0 => TE::Transit(30), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9) },
-    hashmap! { 20 => TE::Shift(31) },
-    hashmap! { 6 => TE::Reduce(16), 7 => TE::Reduce(16), 8 => TE::Reduce(16), 9 => TE::Reduce(16), 10 => TE::Reduce(16), 19 => TE::Reduce(16), 20 => TE::Reduce(16), 21 => TE::Reduce(16) },
-    hashmap! { 0 => TE::Transit(33), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9) },
-    hashmap! { 20 => TE::Shift(34) },
-    hashmap! { 6 => TE::Reduce(17), 7 => TE::Reduce(17), 8 => TE::Reduce(17), 9 => TE::Reduce(17), 10 => TE::Reduce(17), 19 => TE::Reduce(17), 20 => TE::Reduce(17), 21 => TE::Reduce(17) },
-    hashmap! { 0 => TE::Transit(36), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9) },
-    hashmap! { 20 => TE::Shift(37) },
-    hashmap! { 6 => TE::Reduce(18), 7 => TE::Reduce(18), 8 => TE::Reduce(18), 9 => TE::Reduce(18), 10 => TE::Reduce(18), 19 => TE::Reduce(18), 20 => TE::Reduce(18), 21 => TE::Reduce(18) },
-    hashmap! { 0 => TE::Transit(39), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9) },
-    hashmap! { 20 => TE::Shift(40) },
-    hashmap! { 6 => TE::Reduce(19), 7 => TE::Reduce(19), 8 => TE::Reduce(19), 9 => TE::Reduce(19), 10 => TE::Reduce(19), 19 => TE::Reduce(19), 20 => TE::Reduce(19), 21 => TE::Reduce(19) },
-    hashmap! { 3 => TE::Transit(42), 19 => TE::Shift(43) },
-    hashmap! { 0 => TE::Transit(44), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9) },
-    hashmap! { 4 => TE::Transit(46), 6 => TE::Reduce(12), 20 => TE::Reduce(12) },
-    hashmap! { 20 => TE::Shift(45) },
-    hashmap! { 6 => TE::Reduce(20), 7 => TE::Reduce(20), 8 => TE::Reduce(20), 9 => TE::Reduce(20), 10 => TE::Reduce(20), 19 => TE::Reduce(20), 20 => TE::Reduce(20), 21 => TE::Reduce(20) },
-    hashmap! { 6 => TE::Shift(48), 20 => TE::Shift(47) },
-    hashmap! { 6 => TE::Reduce(10), 7 => TE::Reduce(10), 8 => TE::Reduce(10), 9 => TE::Reduce(10), 10 => TE::Reduce(10), 19 => TE::Reduce(10) },
-    hashmap! { 6 => TE::Reduce(11), 20 => TE::Reduce(11) },
-    hashmap! { 0 => TE::Transit(50), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9) },
-    hashmap! { 20 => TE::Shift(51) },
-    hashmap! { 6 => TE::Reduce(21), 7 => TE::Reduce(21), 8 => TE::Reduce(21), 9 => TE::Reduce(21), 10 => TE::Reduce(21), 19 => TE::Reduce(21), 20 => TE::Reduce(21), 21 => TE::Reduce(21) },
-    hashmap! { 3 => TE::Transit(53), 19 => TE::Shift(43) },
-    hashmap! { 0 => TE::Transit(54), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9) },
-    hashmap! { 20 => TE::Shift(55) },
-    hashmap! { 0 => TE::Transit(56), 1 => TE::Transit(2), 5 => TE::Transit(4), 6 => TE::Shift(3), 7 => TE::Shift(5), 8 => TE::Shift(6), 9 => TE::Shift(7), 10 => TE::Shift(8), 19 => TE::Shift(9) },
-    hashmap! { 20 => TE::Shift(57) },
-    hashmap! { 6 => TE::Reduce(22), 7 => TE::Reduce(22), 8 => TE::Reduce(22), 9 => TE::Reduce(22), 10 => TE::Reduce(22), 19 => TE::Reduce(22), 20 => TE::Reduce(22), 21 => TE::Reduce(22) }
+    hashmap! { 0 => TE::Transit(1), 1 => TE::Transit(2), 2 => TE::Transit(3), 4 => TE::Shift(4), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7) },
+    hashmap! { 9 => TE::Accept },
+    hashmap! { 4 => TE::Reduce(1), 5 => TE::Reduce(1), 6 => TE::Reduce(1), 7 => TE::Reduce(1), 8 => TE::Reduce(1), 9 => TE::Reduce(1) },
+    hashmap! { 4 => TE::Reduce(2), 5 => TE::Reduce(2), 6 => TE::Reduce(2), 7 => TE::Reduce(2), 8 => TE::Reduce(2), 9 => TE::Reduce(2) },
+    hashmap! { 4 => TE::Reduce(3), 5 => TE::Reduce(3), 6 => TE::Reduce(3), 7 => TE::Reduce(3), 8 => TE::Reduce(3), 9 => TE::Reduce(3) },
+    hashmap! { 4 => TE::Reduce(4), 5 => TE::Reduce(4), 6 => TE::Reduce(4), 7 => TE::Reduce(4), 8 => TE::Reduce(4), 9 => TE::Reduce(4) },
+    hashmap! { 4 => TE::Reduce(5), 5 => TE::Reduce(5), 6 => TE::Reduce(5), 7 => TE::Reduce(5), 8 => TE::Reduce(5), 9 => TE::Reduce(5) },
+    hashmap! { 3 => TE::Transit(8), 4 => TE::Reduce(8), 5 => TE::Reduce(8), 6 => TE::Reduce(8), 7 => TE::Reduce(8), 8 => TE::Reduce(8) },
+    hashmap! { 0 => TE::Transit(10), 1 => TE::Transit(2), 2 => TE::Transit(3), 4 => TE::Shift(4), 5 => TE::Shift(5), 6 => TE::Shift(6), 7 => TE::Shift(7), 8 => TE::Shift(9) },
+    hashmap! { 4 => TE::Reduce(6), 5 => TE::Reduce(6), 6 => TE::Reduce(6), 7 => TE::Reduce(6), 8 => TE::Reduce(6), 9 => TE::Reduce(6) },
+    hashmap! { 4 => TE::Reduce(7), 5 => TE::Reduce(7), 6 => TE::Reduce(7), 7 => TE::Reduce(7), 8 => TE::Reduce(7) }
 ];
 }
 
@@ -225,9 +152,9 @@ lazy_static! {
 //   }
 //
 
-use common::{Expr,Value};
+use common::{Program,ParsedExpr};
 
-type TResult = Expr;
+type TResult = ParsedExpr;
 
 // ---  end of Module include ---------
 
@@ -319,7 +246,7 @@ struct Tokenizer<'t> {
      */
     yybuffer: Vec<String>,
 
-    handlers: [fn(&mut Tokenizer<'t>) -> &'static str; 16],
+    handlers: [fn(&mut Tokenizer<'t>) -> &'static str; 6],
 }
 
 impl<'t> Tokenizer<'t> {
@@ -359,17 +286,7 @@ impl<'t> Tokenizer<'t> {
     Tokenizer::_lex_rule2,
     Tokenizer::_lex_rule3,
     Tokenizer::_lex_rule4,
-    Tokenizer::_lex_rule5,
-    Tokenizer::_lex_rule6,
-    Tokenizer::_lex_rule7,
-    Tokenizer::_lex_rule8,
-    Tokenizer::_lex_rule9,
-    Tokenizer::_lex_rule10,
-    Tokenizer::_lex_rule11,
-    Tokenizer::_lex_rule12,
-    Tokenizer::_lex_rule13,
-    Tokenizer::_lex_rule14,
-    Tokenizer::_lex_rule15
+    Tokenizer::_lex_rule5
 ],
         };
 
@@ -620,47 +537,7 @@ return "NUMBER"
 }
 
 fn _lex_rule5(&mut self) -> &'static str {
-return "BOOLEAN"
-}
-
-fn _lex_rule6(&mut self) -> &'static str {
-return "NULL"
-}
-
-fn _lex_rule7(&mut self) -> &'static str {
-return "BEGIN"
-}
-
-fn _lex_rule8(&mut self) -> &'static str {
-return "VAR"
-}
-
-fn _lex_rule9(&mut self) -> &'static str {
-return "IF"
-}
-
-fn _lex_rule10(&mut self) -> &'static str {
-return "WHILE"
-}
-
-fn _lex_rule11(&mut self) -> &'static str {
-return "ASSIGN"
-}
-
-fn _lex_rule12(&mut self) -> &'static str {
-return "FUNCTION"
-}
-
-fn _lex_rule13(&mut self) -> &'static str {
-return "LAMBDA"
-}
-
-fn _lex_rule14(&mut self) -> &'static str {
-return "OPERATOR"
-}
-
-fn _lex_rule15(&mut self) -> &'static str {
-return "IDENTIFIER"
+return "SYMBOL"
 }
 }
 
@@ -690,7 +567,7 @@ pub struct Parser<'t> {
     /**
      * Semantic action handlers.
      */
-    handlers: [fn(&mut Parser<'t>) -> SV; 23],
+    handlers: [fn(&mut Parser<'t>) -> SV; 9],
 }
 
 impl<'t> Parser<'t> {
@@ -714,21 +591,7 @@ impl<'t> Parser<'t> {
     Parser::_handler5,
     Parser::_handler6,
     Parser::_handler7,
-    Parser::_handler8,
-    Parser::_handler9,
-    Parser::_handler10,
-    Parser::_handler11,
-    Parser::_handler12,
-    Parser::_handler13,
-    Parser::_handler14,
-    Parser::_handler15,
-    Parser::_handler16,
-    Parser::_handler17,
-    Parser::_handler18,
-    Parser::_handler19,
-    Parser::_handler20,
-    Parser::_handler21,
-    Parser::_handler22
+    Parser::_handler8
 ],
         }
     }
@@ -821,7 +684,7 @@ impl<'t> Parser<'t> {
                         self.unexpected_token(&token);
                     }
 
-                    let result = get_result!(parsed, _2);
+                    let result = get_result!(parsed, _1);
                     
                     return result;
                 },
@@ -852,21 +715,13 @@ __
 
 fn _handler1(&mut self) -> SV {
 // Semantic values prologue.
-let mut _1 = pop!(self.values_stack, _1);
+let mut _1 = self.values_stack.pop().unwrap();
 
-let __ = Expr::Literal(_1);
-SV::_2(__)
+let __ = _1;
+__
 }
 
 fn _handler2(&mut self) -> SV {
-// Semantic values prologue.
-self.values_stack.pop();
-
-let __ = Expr::Identifier(self.tokenizer.yytext.to_string());
-SV::_2(__)
-}
-
-fn _handler3(&mut self) -> SV {
 // Semantic values prologue.
 let mut _1 = self.values_stack.pop().unwrap();
 
@@ -874,11 +729,19 @@ let __ = _1;
 __
 }
 
+fn _handler3(&mut self) -> SV {
+// Semantic values prologue.
+self.values_stack.pop();
+
+let __ = ParsedExpr::Number(self.tokenizer.yytext.parse::<isize>().unwrap());
+SV::_1(__)
+}
+
 fn _handler4(&mut self) -> SV {
 // Semantic values prologue.
 self.values_stack.pop();
 
-let __ = Value::Int(self.tokenizer.yytext.parse::<isize>().unwrap());
+let __ = ParsedExpr::String(self.tokenizer.yytext.to_string());
 SV::_1(__)
 }
 
@@ -886,192 +749,35 @@ fn _handler5(&mut self) -> SV {
 // Semantic values prologue.
 self.values_stack.pop();
 
-let __ = Value::Str(self.tokenizer.yytext.to_string());
+let __ = ParsedExpr::Symbol(self.tokenizer.yytext.to_string());
 SV::_1(__)
 }
 
 fn _handler6(&mut self) -> SV {
 // Semantic values prologue.
 self.values_stack.pop();
+let mut _2 = self.values_stack.pop().unwrap();
+self.values_stack.pop();
 
-let __ = Value::Boolean(self.tokenizer.yytext == "true");
-SV::_1(__)
+let __ = _2;
+__
 }
 
 fn _handler7(&mut self) -> SV {
 // Semantic values prologue.
-self.values_stack.pop();
+let mut _2 = pop!(self.values_stack, _1);
+let mut _1 = pop!(self.values_stack, _2);
 
-let __ = Value::Null;
-SV::_1(__)
+_1.push(_2);
+      let __ = _1;
+SV::_2(__)
 }
 
 fn _handler8(&mut self) -> SV {
 // Semantic values prologue.
-let mut _2 = pop!(self.values_stack, _2);
-let mut _1 = pop!(self.values_stack, _3);
-
-_1.push(_2);
-    let __ = _1;
-SV::_3(__)
-}
-
-fn _handler9(&mut self) -> SV {
-// Semantic values prologue.
 
 
 let __ = Vec::new();
-SV::_3(__)
-}
-
-fn _handler10(&mut self) -> SV {
-// Semantic values prologue.
-self.values_stack.pop();
-let mut _2 = pop!(self.values_stack, _4);
-self.values_stack.pop();
-
-let __ = _2;
-SV::_4(__)
-}
-
-fn _handler11(&mut self) -> SV {
-// Semantic values prologue.
-let mut _2 = pop!(self.values_stack, _0);
-let mut _1 = pop!(self.values_stack, _4);
-
-_1.push(Value::Str(_2.value.to_string()));
-    let __ = _1;
-SV::_4(__)
-}
-
-fn _handler12(&mut self) -> SV {
-// Semantic values prologue.
-
-
-let __ = Vec::new();
-SV::_4(__)
-}
-
-fn _handler13(&mut self) -> SV {
-// Semantic values prologue.
-self.values_stack.pop();
-let mut _3 = pop!(self.values_stack, _3);
-let mut _2 = pop!(self.values_stack, _0);
-self.values_stack.pop();
-
-let __ = Expr::CallExpression(_2.value.to_string(), _3);
-SV::_2(__)
-}
-
-fn _handler14(&mut self) -> SV {
-// Semantic values prologue.
-self.values_stack.pop();
-let mut _3 = pop!(self.values_stack, _3);
-self.values_stack.pop();
-self.values_stack.pop();
-
-let __ = Expr::BlockStatement(_3);
-SV::_2(__)
-}
-
-fn _handler15(&mut self) -> SV {
-// Semantic values prologue.
-self.values_stack.pop();
-let mut _4 = pop!(self.values_stack, _2);
-let mut _3 = pop!(self.values_stack, _0);
-self.values_stack.pop();
-self.values_stack.pop();
-
-let __ = Expr::VariableDeclaration(_3.value.to_string(), Box::new(_4));
-SV::_2(__)
-}
-
-fn _handler16(&mut self) -> SV {
-// Semantic values prologue.
-self.values_stack.pop();
-let mut _5 = pop!(self.values_stack, _2);
-let mut _4 = pop!(self.values_stack, _2);
-let mut _3 = pop!(self.values_stack, _2);
-self.values_stack.pop();
-self.values_stack.pop();
-
-let __ = Expr::IfExpression(Box::new(_3), Box::new(_4), Box::new(_5));
-SV::_2(__)
-}
-
-fn _handler17(&mut self) -> SV {
-// Semantic values prologue.
-self.values_stack.pop();
-let mut _4 = pop!(self.values_stack, _2);
-let mut _3 = pop!(self.values_stack, _2);
-self.values_stack.pop();
-self.values_stack.pop();
-
-let __ = Expr::WhileStatement(Box::new(_3), Box::new(_4));
-SV::_2(__)
-}
-
-fn _handler18(&mut self) -> SV {
-// Semantic values prologue.
-self.values_stack.pop();
-let mut _4 = pop!(self.values_stack, _2);
-let mut _3 = pop!(self.values_stack, _0);
-self.values_stack.pop();
-self.values_stack.pop();
-
-let __ = Expr::Assignment(_3.value.to_string(), Box::new(_4));
-SV::_2(__)
-}
-
-fn _handler19(&mut self) -> SV {
-// Semantic values prologue.
-self.values_stack.pop();
-let mut _4 = pop!(self.values_stack, _2);
-let mut _3 = pop!(self.values_stack, _2);
-let mut _2 = pop!(self.values_stack, _0);
-self.values_stack.pop();
-
-let __ = Expr::BinaryExpression(_2.value.to_string(), Box::new(_3), Box::new(_4));
-SV::_2(__)
-}
-
-fn _handler20(&mut self) -> SV {
-// Semantic values prologue.
-self.values_stack.pop();
-let mut _5 = pop!(self.values_stack, _2);
-let mut _4 = pop!(self.values_stack, _4);
-let mut _3 = pop!(self.values_stack, _0);
-self.values_stack.pop();
-self.values_stack.pop();
-
-let __ = Expr::FunctionDeclaration(_3.value.to_string(), _4, Box::new(_5));
-SV::_2(__)
-}
-
-fn _handler21(&mut self) -> SV {
-// Semantic values prologue.
-self.values_stack.pop();
-let mut _4 = pop!(self.values_stack, _2);
-let mut _3 = pop!(self.values_stack, _4);
-self.values_stack.pop();
-self.values_stack.pop();
-
-let __ = Expr::LambdaExpression(_3, Box::new(_4));
-SV::_2(__)
-}
-
-fn _handler22(&mut self) -> SV {
-// Semantic values prologue.
-self.values_stack.pop();
-let mut _7 = pop!(self.values_stack, _2);
-self.values_stack.pop();
-let mut _5 = pop!(self.values_stack, _2);
-let mut _4 = pop!(self.values_stack, _4);
-self.values_stack.pop();
-self.values_stack.pop();
-self.values_stack.pop();
-
-let __ = Expr::ApplyExpression(Box::new(Expr::LambdaExpression(_4, Box::new(_5))), vec![_7]);
 SV::_2(__)
 }
 }

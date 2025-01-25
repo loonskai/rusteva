@@ -8,17 +8,7 @@
 \s+                /* skip whitespace */ return "";
 \"[^\"]*\"         return "STRING"
 [\-]?\d+           return "NUMBER"
-'true'|'false'     return "BOOLEAN"
-'null'             return "NULL"
-'begin'            return "BEGIN"
-'var'              return "VAR"
-'if'               return "IF"
-'while'            return "WHILE"
-'set'              return "ASSIGN"
-'def'              return "FUNCTION"
-'lambda'           return "LAMBDA"
-[+\-*/=<>]+        return "OPERATOR"
-[\w]+              return "IDENTIFIER"
+[\w\-+*=<>/]+      return "SYMBOL"
 
 /lex
 
@@ -26,116 +16,48 @@
 // Syntactic grammar (BNF)
 
 %{
-use common::{Expr,Value};
+use common::{Program,ParsedExpr};
 
-type TResult = Expr;
+type TResult = ParsedExpr;
 
 %}
 
 %%
 
-Expression
-    : Literal { 
-      |$1: Value| -> Expr;
-      $$ = Expr::Literal($1) 
-    }
-    | IDENTIFIER {
-      || -> Expr;
-      $$ = Expr::Identifier(yytext.to_string())
-    }
-    | SExpr { $$ = $1 }
-    ;
+Exp
+  : Atom
+  | List
+  ;
 
-Literal
-    : NUMBER {
-      || -> Value;
-      $$ = Value::Int(yytext.parse::<isize>().unwrap())
-    }
-    | STRING {
-      || -> Value;
-      $$ = Value::Str(yytext.to_string())
-    }
-    | BOOLEAN {
-      || -> Value;
-      $$ = Value::Boolean(yytext == "true")
-    }
-    | NULL {
-      || -> Value;
-      $$ = Value::Null
-    }
-    ;
-
-ExpressionsList
-  : ExpressionsList Expression {
-    |$1: Vec<Expr>, $2: Expr | -> Vec<Expr>;
-    $1.push($2);
-    $$ = $1
+Atom
+  : NUMBER { 
+    || -> ParsedExpr;
+    $$ = ParsedExpr::Number(yytext.parse::<isize>().unwrap())
   }
-  | /* empty */ {
-    || -> Vec<Expr>; 
-    $$ = Vec::new() 
+  | STRING {
+    || -> ParsedExpr;
+    $$ = ParsedExpr::String(yytext.to_string())
+  }
+  | SYMBOL {
+    || -> ParsedExpr;
+    $$ = ParsedExpr::Symbol(yytext.to_string())
   }
   ;
 
-ParametersList
-  : '(' Parameters ')' {
-    |$2: Vec<Value>| -> Vec<Value>;
+List
+  : '(' ListEntries ')' {
     $$ = $2
   }
   ;
 
-Parameters
-  : Parameters IDENTIFIER {
-    |$1: Vec<Value>, $2: Token| -> Vec<Value>;
-    $1.push(Value::Str($2.value.to_string()));
-    $$ = $1
-  }
+ListEntries
+  : ListEntries Exp {
+    |$1: Vec<ParsedExpr>, $2: ParsedExpr| -> Vec<ParsedExpr>;
+      $1.push($2);
+      $$ = $1
+    }
   | /* empty */ {
-    || -> Vec<Value>; 
-    $$ = Vec::new() 
+    || -> Vec<ParsedExpr>; 
+    $$ = Vec::new()
   }
   ;
-
-SExpr
-  : '(' IDENTIFIER ExpressionsList ')' {
-    |$2: Token, $3: Vec<Expr>| -> Expr;
-    $$ = Expr::CallExpression($2.value.to_string(), $3)
-  }
-  | '(' BEGIN ExpressionsList ')' {
-    |$3: Vec<Expr>| -> Expr;
-    $$ = Expr::BlockStatement($3)
-  }
-  | '(' VAR IDENTIFIER Expression ')' {
-    |$3: Token, $4: Expr| -> Expr;
-    $$ = Expr::VariableDeclaration($3.value.to_string(), Box::new($4))
-  }
-  | '(' IF Expression Expression Expression ')' {
-    |$3: Expr, $4: Expr, $5: Expr| -> Expr;
-    $$ = Expr::IfExpression(Box::new($3), Box::new($4), Box::new($5))
-  }
-  | '(' WHILE Expression Expression ')' {
-    |$3: Expr, $4: Expr| -> Expr;
-    $$ = Expr::WhileStatement(Box::new($3), Box::new($4))
-  }
-  | '(' ASSIGN IDENTIFIER Expression ')' {
-    |$3: Token, $4: Expr| -> Expr;
-    $$ = Expr::Assignment($3.value.to_string(), Box::new($4))
-  }
-  | '(' OPERATOR Expression Expression ')' {
-    |$2: Token, $3: Expr, $4: Expr| -> Expr;
-    $$ = Expr::BinaryExpression($2.value.to_string(), Box::new($3), Box::new($4))
-  }
-  | '(' FUNCTION IDENTIFIER ParametersList Expression ')' {
-    |$3: Token, $4: Vec<Value>, $5: Expr| -> Expr;
-    $$ = Expr::FunctionDeclaration($3.value.to_string(), $4, Box::new($5))
-  }
-  | '(' LAMBDA ParametersList Expression ')' {
-    |$3: Vec<Value>, $4: Expr| -> Expr;
-    $$ = Expr::LambdaExpression($3, Box::new($4))
-  }
-  | '(' '(' LAMBDA ParametersList Expression ')' Expression ')' {
-    |$4: Vec<Value>, $5: Expr, $7: Expr| -> Expr;
-    $$ = Expr::ApplyExpression(Box::new(Expr::LambdaExpression($4, Box::new($5))), vec![$7])
-  }
-  ;
-
