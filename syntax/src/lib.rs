@@ -152,7 +152,7 @@ lazy_static! {
 //   }
 //
 
-use common::{Program,ParsedExpr};
+use common::ParsedExpr;
 
 type TResult = ParsedExpr;
 

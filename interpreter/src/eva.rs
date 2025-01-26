@@ -2,7 +2,7 @@ use std::{cell::RefCell, fmt::Debug, rc::Rc};
 use common::{environment::Environment, Expr, FuncObj, ParsedExpr, Program, Value};
 use unicode_segmentation::{self, UnicodeSegmentation};
 
-use crate::transformer::{self, Transformer};
+use crate::transformer::Transformer;
 
 macro_rules! define_global_variables {
     ($global:expr, $($key_value:expr),*) => {
@@ -52,8 +52,14 @@ impl Eva {
     Eva { global_env, execution_stack, transformer }
   }
 
-  fn eval_expr(&mut self, exp: Expr, env: Rc<RefCell<Environment>>) -> Option<Value> {
-    match exp {
+  pub fn eval(&mut self, parsed_exp: ParsedExpr, current_env: Option<Rc<RefCell<Environment>>>) -> Option<Value> {
+    let env = current_env.map_or(Rc::clone(&self.global_env), |e| e);
+    let expr = self.eval_parsed_expr(parsed_exp, Rc::clone(&env));
+    self.eval_expr(expr, Rc::clone(&env))
+  }
+
+  fn eval_expr(&mut self, expr: Expr, env: Rc<RefCell<Environment>>) -> Option<Value> {
+    match expr {
       Expr::Literal(value) => {
         match value {
           Value::Int(n) => Some(Value::Int(n)),
@@ -110,41 +116,175 @@ impl Eva {
           }
           _ => None,
         }
-      }
-      _ => unimplemented!()
+      },
+      Expr::BlockStatement(expressions) => {
+        let block_env = Rc::new(RefCell::new(Environment::new(Some(env))));
+        let mut result = None;
+        for expr in expressions {
+          result = self.eval_expr(expr, Rc::clone(&block_env));
+        }
+        result
+      },
+      Expr::VariableDeclaration(id_name, exp) => {
+        if let Some(value) = self.eval_expr(*exp, Rc::clone(&env)) {
+          if let Ok(result) = env.borrow_mut().define(&id_name, value) {
+            return Some(result.clone())
+          }
+        }
+        panic!("Unable to declare variable")
+      },
+      Expr::Assignment(id, expr) => {
+        let result = self.eval_expr(*expr, Rc::clone(&env)).map_or(Value::Null, |value| value);
+        let _ = env.borrow_mut().set(&id, result.clone());
+        Some(result)
+      },
+      Expr::IfExpression(condition_expr, consequent_expr, alternate_exp) => {
+        let result = self.eval_expr(*condition_expr, Rc::clone(&env));
+        if let Some(cond) = result {
+          match cond {
+              Value::Boolean(value) => {
+                if value {
+                  return self.eval_expr(*consequent_expr, Rc::clone(&env));
+                } else {
+                  return self.eval_expr(*alternate_exp, Rc::clone(&env));
+                }
+              },
+              _ => panic!("Condition expression must return boolean")
+          }
+        }
+        None
+      },
+      Expr::WhileStatement(condition_expr, consequent_expr) => {
+        let condition = *condition_expr;
+        let consequent = *consequent_expr;
+        let mut condition_result = self.eval_expr(condition.clone(), Rc::clone(&env));
+        let mut consequent_result = None;
+        while let Some(true) = condition_result.as_ref().map(|v| {
+          match v {
+              Value::Boolean(bool_result) => bool_result,
+              _ => panic!("While condition must return boolean")
+          }
+        }) {
+          // Q: Why the order of both evals matters?
+          consequent_result = self.eval_expr(consequent.clone(), Rc::clone(&env));
+          condition_result = self.eval_expr(condition.clone(), Rc::clone(&env));
+        }
+        return consequent_result;
+      },
+      Expr::LambdaExpression(params_expr, body) => {
+        let params: Vec<Value> = 
+          params_expr
+          .iter()
+          .map(|param_expr| self.eval_expr(param_expr.clone(), Rc::clone(&env)).expect("Invalid param expression"))
+          .collect();
+        let func_obj = FuncObj::new(
+          params,
+          body,
+          Rc::clone(&env),
+        );
+        Some(Value::Function(func_obj))
+      },
+      Expr::FunctionDeclaration(_, _, _) => {
+        // JIT-transpile to a variable declaration
+        let var_expr = self.transformer.transform_def_to_var_lambda(expr);
+        self.eval_expr(
+          var_expr,
+          Rc::clone(&env) // Closure
+        )
+      },
+      Expr::CallExpression(func_name, args) => {
+        self.apply(Expr::Identifier(func_name.clone()), args, Rc::clone(&env))
+      },
+      Expr::ApplyExpression(func_expr, args) => {
+        self.apply(*func_expr, args, Rc::clone(&env))
+      },
+      Expr::SwitchStatement(expressions) => {
+        // let if_expr = self.transformer.transform_switch_to_if(exp);
+        None
+      },
     }
   }
 
-  pub fn eval(&mut self, parsed_exp: ParsedExpr, current_env: Option<Rc<RefCell<Environment>>>) -> Option<Value> {
-    let env = current_env.map_or(Rc::clone(&self.global_env), |e| e);
+  fn eval_parsed_expr(&mut self, parsed_exp: ParsedExpr, env: Rc<RefCell<Environment>>) -> Expr {
     match parsed_exp {
-      ParsedExpr::Number(n) => self.eval_expr(Expr::Literal(Value::Int(n)), Rc::clone(&env)),
-      ParsedExpr::String(s) => self.eval_expr(Expr::Literal(Value::Str(s.to_string())), Rc::clone(&env)),
-      ParsedExpr::Symbol(symbol) => self.eval_expr(Expr::Identifier(symbol.to_string()), Rc::clone(&env)),
+      ParsedExpr::Number(n) => Expr::Literal(Value::Int(n)),
+      ParsedExpr::String(s) => Expr::Literal(Value::Str(s.to_string())),
+      ParsedExpr::Symbol(symbol) => Expr::Identifier(symbol.to_string()),
       ParsedExpr::List(expr_list) => {
         match &expr_list[0] {
           ParsedExpr::Symbol(symbol) => {
             match symbol.as_str() {
               "begin" => {
-                unimplemented!()
+                let body_expressions: Vec<Expr> = expr_list
+                  .iter()
+                  .map(|parsed_expr| self.eval_parsed_expr(parsed_exp, Rc::clone(&env)))
+                  .collect();
+                return Expr::BlockStatement(body_expressions);
               },
               "var" => {
-                unimplemented!()
+                let var_name_expr = self.eval_parsed_expr(expr_list[1], Rc::clone(&env));
+                if let Expr::Literal(var_name_value) = var_name_expr {
+                  if let Value::Str(var_name) = var_name_value {
+                    let var_value_expr = self.eval_parsed_expr(expr_list[2], Rc::clone(&env));
+                    return Expr::VariableDeclaration(var_name, Box::new(var_value_expr));
+                  }
+                }
+                panic!("Invalid variable declaration")
               },
               "set" => {
-                unimplemented!()
+                let var_name_expr = self.eval_parsed_expr(expr_list[1], Rc::clone(&env));
+                if let Expr::Literal(var_name_value) = var_name_expr {
+                  if let Value::Str(var_name) = var_name_value {
+                    let var_value_expr = self.eval_parsed_expr(expr_list[2], Rc::clone(&env));
+                    return Expr::Assignment(var_name, Box::new(var_value_expr));
+                  }
+                }
+                panic!("Invalid assignment")
               },
               "if" => {
-                unimplemented!()
+                let condition_expr = self.eval_parsed_expr(expr_list[1], Rc::clone(&env));
+                let consequent_expr = self.eval_parsed_expr(expr_list[2], Rc::clone(&env));
+                let alternate_expr = self.eval_parsed_expr(expr_list[3], Rc::clone(&env));
+                Expr::IfExpression(Box::new(condition_expr), Box::new(consequent_expr), Box::new(alternate_expr))
               },
               "while" => {
-                unimplemented!()
+                let condition_expr = self.eval_parsed_expr(expr_list[1], Rc::clone(&env));
+                let consequent_expr = self.eval_parsed_expr(expr_list[2], Rc::clone(&env));
+                Expr::WhileStatement(Box::new(condition_expr), Box::new(consequent_expr))
               }
+              "lambda" => {
+                    if let ParsedExpr::List(params) = expr_list[1] {
+                      let func_params_expr: Vec<Expr> = 
+                        params
+                          .iter()
+                          .map(|arg| self.eval_parsed_expr(*arg, Rc::clone(&env)))
+                          .collect();
+                      let func_body_expr = self.eval_parsed_expr(expr_list[3], Rc::clone(&env));
+                      return Expr::LambdaExpression(func_params_expr, Box::new(func_body_expr));
+                    }
+                panic!("Invalid function declaration")
+              },
               "def" => {
-                unimplemented!()
+                let func_name_expr = self.eval_parsed_expr(expr_list[1], Rc::clone(&env));
+                if let Expr::Literal(func_name_value) = func_name_expr {
+                  if let Value::Str(func_name) = func_name_value {
+                    if let ParsedExpr::List(params) = expr_list[2] {
+                      let func_params_expr: Vec<Expr> = 
+                        params
+                          .iter()
+                          .map(|arg| self.eval_parsed_expr(*arg, Rc::clone(&env)))
+                          .collect();
+                      let func_body_expr = self.eval_parsed_expr(expr_list[3], Rc::clone(&env));
+                      return Expr::FunctionDeclaration(func_name, func_params_expr, Box::new(func_body_expr));
+                    }
+                  }
+                }
+                panic!("Invalid function declaration")
               },
               _ => {
-                self.eval_expr(Expr::Identifier(symbol.to_string()), env)
+                // Function call
+                // self.eval(Expr::Identifier(symbol.to_string()), env)
+                unimplemented!()
               }
             }
           },
@@ -152,124 +292,35 @@ impl Eva {
           }
         }
       }
-    }
   }
-    
-    // match exp {
 
-      // Expr::VariableDeclaration(id_name, exp) => {
-      //   if let Some(value) = self.eval(*exp, Some(Rc::clone(&env))) {
-      //     if let Ok(result) = env.borrow_mut().define(&id_name, value) {
-      //       return Some(result.clone())
-      //     }
-      //   }
-      //   panic!("Unable to declare variable")
-      // }
-
-      // Expr::BlockStatement(expressions) => {
-      //   let block_env = Environment::new(Some(env)); // BROKEN - we must not clone the parent env
-      //   self.eval_block(expressions, Rc::new(RefCell::new(block_env)))
-      // },
-      // Expr::Assignment(id, expr) => {
-      //   let result = self.eval(*expr, Some(Rc::clone(&env))).map_or(Value::Null, |value| value);
-      //   let _ = env.borrow_mut().set(&id, result.clone());
-      //   Some(result)
-      // },
-      // Expr::IfExpression(condition_expr, consequent_expr, alternate_exp) => {
-      //   let result = self.eval(*condition_expr, Some(Rc::clone(&env)));
-      //   if let Some(cond) = result {
-      //     match cond {
-      //         Value::Boolean(value) => {
-      //           if value {
-      //             return self.eval(*consequent_expr, Some(Rc::clone(&env)));
-      //           } else {
-      //             return self.eval(*alternate_exp, Some(Rc::clone(&env)));
-      //           }
-      //         },
-      //         _ => panic!("Condition expression must return boolean")
-      //     }
-      //   }
-      //   None
-      // },
-      // Expr::WhileStatement(condition_expr, consequent_expr) => {
-      //   let condition = *condition_expr;
-      //   let consequent = *consequent_expr;
-      //   let mut condition_result = self.eval(condition.clone(), Some(Rc::clone(&env))); // 1
-      //   let mut consequent_result = None;
-      //   while let Some(true) = condition_result.as_ref().map(|v| {
-      //     match v {
-      //         Value::Boolean(bool_result) => bool_result,
-      //         _ => panic!("While condition must return boolean")
-      //     }
-      //   }) {
-      //     // Q: Why the order of both evals matters?
-      //     consequent_result = self.eval(consequent.clone(), Some(Rc::clone(&env)));
-      //     condition_result = self.eval(condition.clone(), Some(Rc::clone(&env)));
-      //   }
-      //   return consequent_result;
-      // },
-      // Expr::CallExpression(func_name, args) => {
-      //   self.apply(Expr::Identifier(func_name.clone()), args, Rc::clone(&env))
-      // },
-      // Expr::ApplyExpression(func_expr, args) => {
-      //   self.apply(*func_expr, args, Rc::clone(&env))
-      // },
-      // Expr::FunctionDeclaration(_, _, _) => {
-      //   // JIT-transpile to a variable declaration
-      //   let var_expr = self.transformer.transform_def_to_var_lambda(exp);
-      //   self.eval(
-      //     var_expr,
-      //     Some(Rc::clone(&env)) // Closure
-      //   )
-      // },
-      // Expr::LambdaExpression(params, body) => {
-      //   let func_obj = FuncObj::new(
-      //     params,
-      //     body,
-      //     Rc::clone(&env),
-      //   );
-      //   Some(Value::Function(func_obj))
-      // },
-      // Expr::SwitchStatement(expressions) => {
-      //   // let if_expr = self.transformer.transform_switch_to_if(exp);
-      //   None
-      // },
-    // }
-
-  // fn apply(&mut self, expr: Expr, args: Vec<Expr>, env: Rc<RefCell<Environment>>) -> Option<Value> {
-  //   let func_obj = self.eval(expr, Some(Rc::clone(&env))).map(|v| {
-  //     match v {
-  //       Value::Function(f) => f,
-  //       _ => panic!("Invalid function call"),
-  //     }
-  //   }).expect("Expected a function");
-  //   if args.len() != func_obj.params.len() {
-  //     panic!("Function arguments mismatch!")
-  //   }
-  //   let activation_env = Rc::new(RefCell::new(Environment::new(Some(func_obj.env))));
-  //   // TODO: How to implement "debugger" Expr::Breakpoint and test execution stack? Also display stack trace on exceptions
-  //   self.execution_stack.push(Rc::clone(&activation_env));
-  //   for param in func_obj.params.into_iter().enumerate() {
-  //     match &param {
-  //       (index, Value::Str(param_name)) => {
-  //         let evaluated_arg = self.eval(args[*index].clone(), Some(Rc::clone(&env))).expect("Unable to evaluate argument");
-  //         let _ = activation_env.borrow_mut().define(param_name, evaluated_arg);
-  //       },
-  //       _ => panic!("Invalid function parameter format")
-  //     }
-  //   }
-  //   let result = self.eval(*func_obj.body, Some(Rc::clone(&activation_env)));
-  //   self.execution_stack.pop();
-  //   result
-  // }
-
-  // fn eval_block(&mut self, expressions: Vec<Expr>, env: Rc<RefCell<Environment>>) -> Option<Value> {
-  //   let mut result = None;
-  //   for exp in expressions {
-  //     result = self.eval(exp, Some(Rc::clone(&env)));
-  //   }
-  //   result
-  // }
+  fn apply(&mut self, expr: Expr, args: Vec<Expr>, env: Rc<RefCell<Environment>>) -> Option<Value> {
+    let func_obj = self.eval_expr(expr, Rc::clone(&env)).map(|v| {
+      match v {
+        Value::Function(f) => f,
+        _ => panic!("Invalid function call"),
+      }
+    }).expect("Expected a function");
+    if args.len() != func_obj.params.len() {
+      panic!("Function arguments mismatch!")
+    }
+    let activation_env = Rc::new(RefCell::new(Environment::new(Some(func_obj.env))));
+    // TODO: How to implement "debugger" Expr::Breakpoint and test execution stack? Also display stack trace on exceptions
+    self.execution_stack.push(Rc::clone(&activation_env));
+    for param in func_obj.params.into_iter().enumerate() {
+      match &param {
+        (index, Value::Str(param_name)) => {
+          let evaluated_arg = self.eval_expr(args[*index].clone(), Rc::clone(&env)).expect("Unable to evaluate argument");
+          let _ = activation_env.borrow_mut().define(param_name, evaluated_arg);
+        },
+        _ => panic!("Invalid function parameter format")
+      }
+    }
+    let result = self.eval_expr(*func_obj.body, Rc::clone(&activation_env));
+    self.execution_stack.pop();
+    result
+  }
+}
 
 #[cfg(test)]
 mod tests {
@@ -317,307 +368,307 @@ mod tests {
     let mut parser = Parser::new();
 
     // Math functions:
-    // assert_eq!(eva.eval(parser.parse("(+ 1 5)"), None), Some(Value::Int(6)));
-  //   assert_eq!(eva.eval(parser.parse("(+ (+ 2 3) 5)"), None), Some(Value::Int(10)));
-  //   assert_eq!(eva.eval(parser.parse("(+ (* 2 3) 5)"), None), Some(Value::Int(11)));
-  //   assert_eq!(eva.eval(parser.parse("(+ (/ 10 2) 5)"), None), Some(Value::Int(10)));
+    assert_eq!(eva.eval(parser.parse("(+ 1 5)"), None), Some(Value::Int(6)));
+    assert_eq!(eva.eval(parser.parse("(+ (+ 2 3) 5)"), None), Some(Value::Int(10)));
+    assert_eq!(eva.eval(parser.parse("(+ (* 2 3) 5)"), None), Some(Value::Int(11)));
+    assert_eq!(eva.eval(parser.parse("(+ (/ 10 2) 5)"), None), Some(Value::Int(10)));
 
-  //   // // Comparison - still as binary expression:
-  //   assert_eq!(eva.eval(parser.parse("(> 1 5)"), None), Some(Value::Boolean(false)));
-  //   assert_eq!(eva.eval(parser.parse("(< 1 5)"), None), Some(Value::Boolean(true)));
-  //   assert_eq!(eva.eval(parser.parse("(>= 1 5)"), None), Some(Value::Boolean(false)));
-  //   assert_eq!(eva.eval(parser.parse("(<= 1 5)"), None), Some(Value::Boolean(true)));
-  //   assert_eq!(eva.eval(parser.parse("(== 5 5)"), None), Some(Value::Boolean(true)));
+    // Comparison functions:
+    assert_eq!(eva.eval(parser.parse("(> 1 5)"), None), Some(Value::Boolean(false)));
+    assert_eq!(eva.eval(parser.parse("(< 1 5)"), None), Some(Value::Boolean(true)));
+    assert_eq!(eva.eval(parser.parse("(>= 1 5)"), None), Some(Value::Boolean(false)));
+    assert_eq!(eva.eval(parser.parse("(<= 1 5)"), None), Some(Value::Boolean(true)));
+    assert_eq!(eva.eval(parser.parse("(== 5 5)"), None), Some(Value::Boolean(true)));
   }
 
-  // #[test]
-  // #[should_panic]
-  // fn division_by_zero() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+  #[test]
+  #[should_panic]
+  fn division_by_zero() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(eva.eval(parser.parse("(/ 1 0)"), None), Some(Value::Int(0)));
-  // }
+    assert_eq!(eva.eval(parser.parse("(/ 1 0)"), None), Some(Value::Int(0)));
+  }
 
-  // #[test]
-  // fn variable_declaration() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+  #[test]
+  fn variable_declaration() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(
-  //     eva.eval(parser.parse("(var x 10)"), None),
-  //     Some(Value::Int(10))
-  //   );
-  //   assert_eq!(
-  //     eva.eval(parser.parse("x"), None),
-  //     Some(Value::Int(10))
-  //   );
-  //   eva.eval(parser.parse("(var z (+ 2 4))"), None);
-  //   assert_eq!(
-  //     eva.eval(parser.parse("z"), None),
-  //     Some(Value::Int(6))
-  //   );
-  // }
+    assert_eq!(
+      eva.eval(parser.parse("(var x 10)"), None),
+      Some(Value::Int(10))
+    );
+    assert_eq!(
+      eva.eval(parser.parse("x"), None),
+      Some(Value::Int(10))
+    );
+    eva.eval(parser.parse("(var z (+ 2 4))"), None);
+    assert_eq!(
+      eva.eval(parser.parse("z"), None),
+      Some(Value::Int(6))
+    );
+  }
 
-  // #[test]
-  // fn block_statement() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+  #[test]
+  fn block_statement() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(
-  //     eva.eval(parser.parse("
-  //       (begin
-  //         (var x 10)
-  //         (var y 20)
-  //         (+ (* x y) 30)
-  //       )
-  //     "),
-  //       None
-  //     ),
-  //     Some(Value::Int(230))
-  //   );
-  // }
+    assert_eq!(
+      eva.eval(parser.parse("
+        (begin
+          (var x 10)
+          (var y 20)
+          (+ (* x y) 30)
+        )
+      "),
+        None
+      ),
+      Some(Value::Int(230))
+    );
+  }
 
-  // #[test]
-  // fn nested_blocks() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+  #[test]
+  fn nested_blocks() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(
-  //     eva.eval(parser.parse("
-  //       (begin
-  //         (var x 10)
-  //         (begin
-  //           (var x 20))
-  //         x
-  //       )
-  //     "), None),
-  //     Some(Value::Int(10)),
-  //   );
-  // }
+    assert_eq!(
+      eva.eval(parser.parse("
+        (begin
+          (var x 10)
+          (begin
+            (var x 20))
+          x
+        )
+      "), None),
+      Some(Value::Int(10)),
+    );
+  }
 
-  // #[test]
-  // fn outer_scope_reference() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+  #[test]
+  fn outer_scope_reference() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(
-  //     eva.eval(parser.parse("
-  //       (begin
-  //         (var x 10)
-  //         (var y (begin
-  //           x))
-  //         y
-  //       )
-  //     "), None),
-  //     Some(Value::Int(10))
-  //   )
-  // }
+    assert_eq!(
+      eva.eval(parser.parse("
+        (begin
+          (var x 10)
+          (var y (begin
+            x))
+          y
+        )
+      "), None),
+      Some(Value::Int(10))
+    )
+  }
 
-  // #[test]
-  // fn scope_chain_traversal() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+  #[test]
+  fn scope_chain_traversal() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(
-  //     eva.eval(parser.parse("
-  //       (begin
-  //         (var value 10)
-  //         (var result (begin
-  //           (var x (+ value 10))
-  //           x)
-  //         )
-  //         result
-  //       )
-  //     "), None),
-  //     Some(Value::Int(20)),
-  //   )
-  // }
+    assert_eq!(
+      eva.eval(parser.parse("
+        (begin
+          (var value 10)
+          (var result (begin
+            (var x (+ value 10))
+            x)
+          )
+          result
+        )
+      "), None),
+      Some(Value::Int(20)),
+    )
+  }
 
-  // #[test]
-  // fn same_scope_assignment() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+  #[test]
+  fn same_scope_assignment() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(
-  //     eva.eval(parser.parse("
-  //       (begin
-  //         (var data 10)
-  //         (set data 100)
-  //         data
-  //       )
-  //     "), None),
-  //     Some(Value::Int(100))
-  //   );
-  // }
+    assert_eq!(
+      eva.eval(parser.parse("
+        (begin
+          (var data 10)
+          (set data 100)
+          data
+        )
+      "), None),
+      Some(Value::Int(100))
+    );
+  }
 
-  // #[test]
-  // fn outer_scope_assignment() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+  #[test]
+  fn outer_scope_assignment() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(
-  //     eva.eval(parser.parse("
-  //       (begin
-  //         (var data 10)
-  //         (begin
-  //           (set data 100)
-  //         )
-  //         data
-  //       )
-  //     "), None),
-  //     Some(Value::Int(100))
-  //   );
-  // }
+    assert_eq!(
+      eva.eval(parser.parse("
+        (begin
+          (var data 10)
+          (begin
+            (set data 100)
+          )
+          data
+        )
+      "), None),
+      Some(Value::Int(100))
+    );
+  }
 
-  // #[test]
-  // fn if_expression() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+  #[test]
+  fn if_expression() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(
-  //     eva.eval(parser.parse("
-  //       (begin
-  //         (var x 10)
-  //         (var y 0)
-  //         (if
-  //           (> x 10)
-  //           (set y 20)
-  //           (set y 30)
-  //         )
-  //       )
-  //     "), None),
-  //     Some(Value::Int(30))
-  //   )
-  // }
+    assert_eq!(
+      eva.eval(parser.parse("
+        (begin
+          (var x 10)
+          (var y 0)
+          (if
+            (> x 10)
+            (set y 20)
+            (set y 30)
+          )
+        )
+      "), None),
+      Some(Value::Int(30))
+    )
+  }
 
-  // #[test]
-  // fn while_statement() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+  #[test]
+  fn while_statement() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(
-  //     eva.eval(parser.parse("
-  //       (begin
-  //         (var counter 0)
-  //         (var result 0)
-  //         (while
-  //           (< counter 10)
-  //           (begin
-  //             (set counter (+ result 1))
-  //             (set result (+ result 1))
-  //           )
-  //         )
-  //         result
-  //       )
-  //     "), None),
-  //     Some(Value::Int(10))
-  //   )
-  // }
+    assert_eq!(
+      eva.eval(parser.parse("
+        (begin
+          (var counter 0)
+          (var result 0)
+          (while
+            (< counter 10)
+            (begin
+              (set counter (+ result 1))
+              (set result (+ result 1))
+            )
+          )
+          result
+        )
+      "), None),
+      Some(Value::Int(10))
+    )
+  }
 
-  // #[test]
-  // fn user_defined_functions() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+  #[test]
+  fn user_defined_functions() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(eva.eval(parser.parse("
-  //     (begin 
-  //       (def square (x) (* x x))
-  //       (square 2)
-  //     )
-  //     "), None),
-  //     Some(Value::Int(4))
-  //   );
-  //   assert_eq!(eva.eval(parser.parse("
-  //     (begin 
-  //       (def calc (x y) 
-  //         (begin
-  //           (var z 30)
-  //           (+ (* x y) z)
-  //         )
-  //       )
-  //       (calc 10 20)
-  //     )
-  //     "), None),
-  //     Some(Value::Int(230))
-  //   );
-  //   assert_eq!(eva.eval(parser.parse("
-  //     (begin
-  //       (var value 100)
-  //       (def calc (x y) 
-  //         (begin
-  //           (var z (+ x y))
-  //           (def inner (foo)
-  //             (+ (+ foo z) value)
-  //           )
-  //           inner
-  //         )
-  //       )
-  //       (var fn (calc 10 20))
-  //       (fn 30)
-  //     )
-  //     "), None),
-  //     Some(Value::Int(160))
-  //   );
-  // }
+    assert_eq!(eva.eval(parser.parse("
+      (begin 
+        (def square (x) (* x x))
+        (square 2)
+      )
+      "), None),
+      Some(Value::Int(4))
+    );
+    assert_eq!(eva.eval(parser.parse("
+      (begin 
+        (def calc (x y) 
+          (begin
+            (var z 30)
+            (+ (* x y) z)
+          )
+        )
+        (calc 10 20)
+      )
+      "), None),
+      Some(Value::Int(230))
+    );
+    assert_eq!(eva.eval(parser.parse("
+      (begin
+        (var value 100)
+        (def calc (x y) 
+          (begin
+            (var z (+ x y))
+            (def inner (foo)
+              (+ (+ foo z) value)
+            )
+            inner
+          )
+        )
+        (var fn (calc 10 20))
+        (fn 30)
+      )
+      "), None),
+      Some(Value::Int(160))
+    );
+  }
 
-  // #[test]
-  // fn lambda_functions() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+  #[test]
+  fn lambda_functions() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(eva.eval(parser.parse("
-  //     (begin
-  //       (def onClick (callback) 
-  //         (begin
-  //           (var x 10)
-  //           (var y 20)
-  //           (callback (+ x y))
-  //         )
-  //       )
-  //       (onClick (lambda (data) (* data 10)))
-  //     )
-  //   "), None), Some(Value::Int(300)))
-  // }
+    assert_eq!(eva.eval(parser.parse("
+      (begin
+        (def onClick (callback) 
+          (begin
+            (var x 10)
+            (var y 20)
+            (callback (+ x y))
+          )
+        )
+        (onClick (lambda (data) (* data 10)))
+      )
+    "), None), Some(Value::Int(300)))
+  }
 
-  // #[test]
-  // fn immediately_invoked_lambda_expression() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+  #[test]
+  fn immediately_invoked_lambda_expression() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(eva.eval(parser.parse("((lambda (x) (* x x)) 2)"), None), Some(Value::Int(4)));
-  // }
+    assert_eq!(eva.eval(parser.parse("((lambda (x) (* x x)) 2)"), None), Some(Value::Int(4)));
+  }
 
-  // #[test]
-  // fn lambda_assignment() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+  #[test]
+  fn lambda_assignment() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(eva.eval(parser.parse("
-  //     (begin
-  //       (var square (lambda (x) (* x x)))
-  //       (square 2)
-  //     )
-  //   "), None), Some(Value::Int(4)));
-  // }
+    assert_eq!(eva.eval(parser.parse("
+      (begin
+        (var square (lambda (x) (* x x)))
+        (square 2)
+      )
+    "), None), Some(Value::Int(4)));
+  }
 
-  // #[test]
-  // fn recursive_function() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+  #[test]
+  fn recursive_function() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(eva.eval(parser.parse("
-  //     (begin
-  //       (def factorial (x)
-  //         (if (== x 1)
-  //           1
-  //           (* x (factorial (- x 1)))
-  //         )
-  //       )
-  //       (factorial 5)
-  //     )
-  //   "), None), Some(Value::Int(120)))
-  // }
+    assert_eq!(eva.eval(parser.parse("
+      (begin
+        (def factorial (x)
+          (if (== x 1)
+            1
+            (* x (factorial (- x 1)))
+          )
+        )
+        (factorial 5)
+      )
+    "), None), Some(Value::Int(120)))
+  }
 
   // #[test]
   // fn switch_statement() {

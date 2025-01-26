@@ -5,12 +5,6 @@ use std::{cell::RefCell, rc::Rc};
 use environment::Environment;
 
 #[derive(Debug)]
-pub enum Program {
-    Atom(ParsedExpr),
-    List(Vec<ParsedExpr>)
-}
-
-#[derive(Debug)]
 pub enum ParsedExpr {
     Number(isize),
     String(String),
@@ -46,7 +40,6 @@ pub enum Value {
 
 #[derive(Debug,PartialEq,Clone)]
 pub enum Expr {
-    List(Vec<Expr>),
     Literal(Value),
     BinaryExpression(String, Box<Expr>, Box<Expr>),
     VariableDeclaration(String, Box<Expr>),
@@ -56,8 +49,8 @@ pub enum Expr {
     IfExpression(Box<Expr>, Box<Expr>, Box<Expr>),
     WhileStatement(Box<Expr>, Box<Expr>),
     CallExpression(String, Vec<Expr>),
-    FunctionDeclaration(String, Vec<Value>, Box<Expr>),
-    LambdaExpression(Vec<Value>, Box<Expr>),
+    FunctionDeclaration(String, Vec<Expr>, Box<Expr>),
+    LambdaExpression(Vec<Expr>, Box<Expr>),
     ApplyExpression(Box<Expr>, Vec<Expr>),
     SwitchStatement(Vec<Expr>),
 }
