@@ -1,5 +1,5 @@
 use std::{cell::RefCell, fmt::Debug, rc::Rc};
-use common::{environment::Environment, Expr, FuncObj, ParsedExpr, Program, Value};
+use common::{environment::Environment, Expr, FuncObj, ParsedExpr, Value};
 use unicode_segmentation::{self, UnicodeSegmentation};
 
 use crate::transformer::Transformer;
@@ -16,11 +16,11 @@ macro_rules! define_global_variables {
 macro_rules! define_binary_operators {
     ($global:expr, $($op:expr),* ) => {
         $(
-          let n1 = Value::Str("n1".to_string());
-          let n2 = Value::Str("n2".to_string());
+          let n1 = "n1".to_string();
+          let n2 = "n2".to_string();
           let _ = $global.borrow_mut().define(&$op.to_string(), Value::Function(FuncObj::new(
             vec![n1.clone(), n2.clone()],
-            Box::new(Expr::BinaryExpression($op.to_string(), Box::new(Expr::Literal(n1)), Box::new(Expr::Literal(n2)))),
+            Box::new(Expr::BinaryExpression($op.to_string(), Box::new(Expr::Identifier(n1)), Box::new(Expr::Identifier(n2)))),
             Rc::clone(&$global)
             )
           ));
@@ -46,13 +46,13 @@ impl Eva {
       ("true", Value::Boolean(true)), 
       ("false", Value::Boolean(false))
     );
-    define_binary_operators!(global_env, "+", "-", "*", "/");
+    define_binary_operators!(global_env, "+", "-", "*", "/",  ">", "<", ">=", "<=", "==");
     let execution_stack: Vec<Rc<RefCell<Environment>>> = vec![];
     let transformer = Transformer::new();
     Eva { global_env, execution_stack, transformer }
   }
 
-  pub fn eval(&mut self, parsed_exp: ParsedExpr, current_env: Option<Rc<RefCell<Environment>>>) -> Option<Value> {
+  pub fn eval(&mut self, parsed_exp: Rc<RefCell<ParsedExpr>>, current_env: Option<Rc<RefCell<Environment>>>) -> Option<Value> {
     let env = current_env.map_or(Rc::clone(&self.global_env), |e| e);
     let expr = self.eval_parsed_expr(parsed_exp, Rc::clone(&env));
     self.eval_expr(expr, Rc::clone(&env))
@@ -171,12 +171,7 @@ impl Eva {
         }
         return consequent_result;
       },
-      Expr::LambdaExpression(params_expr, body) => {
-        let params: Vec<Value> = 
-          params_expr
-          .iter()
-          .map(|param_expr| self.eval_expr(param_expr.clone(), Rc::clone(&env)).expect("Invalid param expression"))
-          .collect();
+      Expr::LambdaExpression(params, body) => {
         let func_obj = FuncObj::new(
           params,
           body,
@@ -192,106 +187,98 @@ impl Eva {
           Rc::clone(&env) // Closure
         )
       },
-      Expr::CallExpression(func_name, args) => {
-        self.apply(Expr::Identifier(func_name.clone()), args, Rc::clone(&env))
-      },
+      // Expr::CallExpression(func_name, args) => {
+      //   self.apply(Expr::Identifier(func_name.clone()), args, Rc::clone(&env))
+      // },
       Expr::ApplyExpression(func_expr, args) => {
         self.apply(*func_expr, args, Rc::clone(&env))
       },
-      Expr::SwitchStatement(expressions) => {
+      Expr::SwitchStatement(_) => {
         // let if_expr = self.transformer.transform_switch_to_if(exp);
         None
       },
     }
   }
 
-  fn eval_parsed_expr(&mut self, parsed_exp: ParsedExpr, env: Rc<RefCell<Environment>>) -> Expr {
-    match parsed_exp {
-      ParsedExpr::Number(n) => Expr::Literal(Value::Int(n)),
+  fn eval_parsed_expr(&mut self, parsed_exp: Rc<RefCell<ParsedExpr>>, env: Rc<RefCell<Environment>>) -> Expr {
+    match &*parsed_exp.borrow() {
+      ParsedExpr::Number(n) => Expr::Literal(Value::Int(*n)),
       ParsedExpr::String(s) => Expr::Literal(Value::Str(s.to_string())),
       ParsedExpr::Symbol(symbol) => Expr::Identifier(symbol.to_string()),
       ParsedExpr::List(expr_list) => {
-        match &expr_list[0] {
+        match &*expr_list[0].borrow() {
           ParsedExpr::Symbol(symbol) => {
             match symbol.as_str() {
               "begin" => {
-                let body_expressions: Vec<Expr> = expr_list
+                let body_expressions: Vec<Expr> = expr_list[1..]
                   .iter()
-                  .map(|parsed_expr| self.eval_parsed_expr(parsed_exp, Rc::clone(&env)))
+                  .map(|expr| self.eval_parsed_expr(Rc::clone(&expr), Rc::clone(&env)))
                   .collect();
                 return Expr::BlockStatement(body_expressions);
               },
               "var" => {
-                let var_name_expr = self.eval_parsed_expr(expr_list[1], Rc::clone(&env));
-                if let Expr::Literal(var_name_value) = var_name_expr {
-                  if let Value::Str(var_name) = var_name_value {
-                    let var_value_expr = self.eval_parsed_expr(expr_list[2], Rc::clone(&env));
-                    return Expr::VariableDeclaration(var_name, Box::new(var_value_expr));
-                  }
+                let var_name_expr = self.eval_parsed_expr(Rc::clone(&expr_list[1]), Rc::clone(&env));
+                if let Expr::Identifier(var_name) = var_name_expr {
+                  let var_value_expr = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env));
+                  return Expr::VariableDeclaration(var_name, Box::new(var_value_expr));
                 }
                 panic!("Invalid variable declaration")
               },
               "set" => {
-                let var_name_expr = self.eval_parsed_expr(expr_list[1], Rc::clone(&env));
-                if let Expr::Literal(var_name_value) = var_name_expr {
-                  if let Value::Str(var_name) = var_name_value {
-                    let var_value_expr = self.eval_parsed_expr(expr_list[2], Rc::clone(&env));
-                    return Expr::Assignment(var_name, Box::new(var_value_expr));
-                  }
+                let var_name_expr = self.eval_parsed_expr(Rc::clone(&expr_list[1]), Rc::clone(&env));
+                if let Expr::Identifier(var_name) = var_name_expr {
+                  let var_value_expr = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env));
+                  return Expr::Assignment(var_name, Box::new(var_value_expr));
                 }
                 panic!("Invalid assignment")
               },
               "if" => {
-                let condition_expr = self.eval_parsed_expr(expr_list[1], Rc::clone(&env));
-                let consequent_expr = self.eval_parsed_expr(expr_list[2], Rc::clone(&env));
-                let alternate_expr = self.eval_parsed_expr(expr_list[3], Rc::clone(&env));
+                let condition_expr = self.eval_parsed_expr(Rc::clone(&expr_list[1]), Rc::clone(&env));
+                let consequent_expr = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env));
+                let alternate_expr = self.eval_parsed_expr(Rc::clone(&expr_list[3]), Rc::clone(&env));
                 Expr::IfExpression(Box::new(condition_expr), Box::new(consequent_expr), Box::new(alternate_expr))
               },
               "while" => {
-                let condition_expr = self.eval_parsed_expr(expr_list[1], Rc::clone(&env));
-                let consequent_expr = self.eval_parsed_expr(expr_list[2], Rc::clone(&env));
+                let condition_expr = self.eval_parsed_expr(Rc::clone(&expr_list[1]), Rc::clone(&env));
+                let consequent_expr = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env));
                 Expr::WhileStatement(Box::new(condition_expr), Box::new(consequent_expr))
               }
               "lambda" => {
-                    if let ParsedExpr::List(params) = expr_list[1] {
-                      let func_params_expr: Vec<Expr> = 
-                        params
-                          .iter()
-                          .map(|arg| self.eval_parsed_expr(*arg, Rc::clone(&env)))
-                          .collect();
-                      let func_body_expr = self.eval_parsed_expr(expr_list[3], Rc::clone(&env));
-                      return Expr::LambdaExpression(func_params_expr, Box::new(func_body_expr));
-                    }
-                panic!("Invalid function declaration")
+                if let ParsedExpr::List(ref params_parsed_expr) = *expr_list[1].borrow_mut() {
+                  let func_params = self.transformer.transform_parsed_params_to_strings(&params_parsed_expr);
+                  let func_body_expr = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env));
+                  return Expr::LambdaExpression(func_params, Box::new(func_body_expr));
+                }
+                panic!("Invalid lambda expression")
               },
               "def" => {
-                let func_name_expr = self.eval_parsed_expr(expr_list[1], Rc::clone(&env));
-                if let Expr::Literal(func_name_value) = func_name_expr {
-                  if let Value::Str(func_name) = func_name_value {
-                    if let ParsedExpr::List(params) = expr_list[2] {
-                      let func_params_expr: Vec<Expr> = 
-                        params
-                          .iter()
-                          .map(|arg| self.eval_parsed_expr(*arg, Rc::clone(&env)))
-                          .collect();
-                      let func_body_expr = self.eval_parsed_expr(expr_list[3], Rc::clone(&env));
-                      return Expr::FunctionDeclaration(func_name, func_params_expr, Box::new(func_body_expr));
-                    }
+                let func_name_expr = self.eval_parsed_expr(Rc::clone(&expr_list[1]), Rc::clone(&env));
+                if let Expr::Identifier(func_name) = func_name_expr {
+                  if let ParsedExpr::List(ref params_parsed_expr) = *expr_list[2].borrow() {
+                    let func_params = self.transformer.transform_parsed_params_to_strings(&params_parsed_expr);
+                    let func_body_expr = self.eval_parsed_expr(Rc::clone(&expr_list[3]), Rc::clone(&env));
+                    return Expr::FunctionDeclaration(func_name, func_params, Box::new(func_body_expr));
                   }
                 }
                 panic!("Invalid function declaration")
               },
-              _ => {
-                // Function call
-                // self.eval(Expr::Identifier(symbol.to_string()), env)
-                unimplemented!()
-              }
+              _ => self.call(&expr_list, Rc::clone(&env))
             }
           },
-          _ => unimplemented!()
+          _ => self.call(&expr_list, Rc::clone(&env))
           }
         }
       }
+  }
+
+  fn call(&mut self, expr_list: &Vec<Rc<RefCell<ParsedExpr>>>, env: Rc<RefCell<Environment>>) -> Expr {
+    let func_expr = self.eval_parsed_expr(Rc::clone(&expr_list[0]), Rc::clone(&env));
+    let args_expr: Vec<Expr> = 
+      expr_list[1..]
+      .iter()
+      .map(|arg_expr| self.eval_parsed_expr(Rc::clone(&arg_expr), Rc::clone(&env)))
+      .collect();
+    Expr::ApplyExpression(Box::new(func_expr), args_expr)
   }
 
   fn apply(&mut self, expr: Expr, args: Vec<Expr>, env: Rc<RefCell<Environment>>) -> Option<Value> {
@@ -309,11 +296,10 @@ impl Eva {
     self.execution_stack.push(Rc::clone(&activation_env));
     for param in func_obj.params.into_iter().enumerate() {
       match &param {
-        (index, Value::Str(param_name)) => {
+        (index, param_name) => {
           let evaluated_arg = self.eval_expr(args[*index].clone(), Rc::clone(&env)).expect("Unable to evaluate argument");
           let _ = activation_env.borrow_mut().define(param_name, evaluated_arg);
         },
-        _ => panic!("Invalid function parameter format")
       }
     }
     let result = self.eval_expr(*func_obj.body, Rc::clone(&activation_env));

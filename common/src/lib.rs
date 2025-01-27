@@ -9,18 +9,18 @@ pub enum ParsedExpr {
     Number(isize),
     String(String),
     Symbol(String),
-    List(Vec<ParsedExpr>)
+    List(Vec<Rc<RefCell<ParsedExpr>>>)
 }
 
 #[derive(Debug,PartialEq,Clone)]
 pub struct FuncObj {
-    pub params: Vec<Value>,
+    pub params: Vec<String>,
     pub body: Box<Expr>,
     pub env: Rc<RefCell<Environment>>
 }
 
 impl FuncObj {
-    pub fn new(params: Vec<Value>, body: Box<Expr>, env: Rc<RefCell<Environment>>) -> Self {
+    pub fn new(params: Vec<String>, body: Box<Expr>, env: Rc<RefCell<Environment>>) -> Self {
         FuncObj {
             params,
             body,
@@ -48,9 +48,9 @@ pub enum Expr {
     Assignment(String, Box<Expr>),
     IfExpression(Box<Expr>, Box<Expr>, Box<Expr>),
     WhileStatement(Box<Expr>, Box<Expr>),
-    CallExpression(String, Vec<Expr>),
-    FunctionDeclaration(String, Vec<Expr>, Box<Expr>),
-    LambdaExpression(Vec<Expr>, Box<Expr>),
+    // CallExpression(String, Vec<Expr>),
+    FunctionDeclaration(String, Vec<String>, Box<Expr>),
+    LambdaExpression(Vec<String>, Box<Expr>),
     ApplyExpression(Box<Expr>, Vec<Expr>),
     SwitchStatement(Vec<Expr>),
 }

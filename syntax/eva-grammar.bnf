@@ -17,8 +17,9 @@
 
 %{
 use common::ParsedExpr;
+use std::{cell::RefCell, rc::Rc};
 
-type TResult = ParsedExpr;
+type TResult = Rc<RefCell<ParsedExpr>>;
 
 %}
 
@@ -31,33 +32,34 @@ Exp
 
 Atom
   : NUMBER { 
-    || -> ParsedExpr;
-    $$ = ParsedExpr::Number(yytext.parse::<isize>().unwrap())
+    || -> Rc<RefCell<ParsedExpr>>;
+    $$ = Rc::new(RefCell::new(ParsedExpr::Number(yytext.parse::<isize>().unwrap())))
   }
   | STRING {
-    || -> ParsedExpr;
-    $$ = ParsedExpr::String(yytext.to_string())
+    || -> Rc<RefCell<ParsedExpr>>;
+    $$ = Rc::new(RefCell::new(ParsedExpr::String(yytext.to_string())))
   }
   | SYMBOL {
-    || -> ParsedExpr;
-    $$ = ParsedExpr::Symbol(yytext.to_string())
+    || -> Rc<RefCell<ParsedExpr>>;
+    $$ = Rc::new(RefCell::new(ParsedExpr::Symbol(yytext.to_string())))
   }
   ;
 
 List
   : '(' ListEntries ')' {
-    $$ = $2
+    |$2: Vec<Rc<RefCell<ParsedExpr>>>| -> Rc<RefCell<ParsedExpr>>;
+    $$ = Rc::new(RefCell::new(ParsedExpr::List($2)))
   }
   ;
 
 ListEntries
   : ListEntries Exp {
-    |$1: Vec<ParsedExpr>, $2: ParsedExpr| -> Vec<ParsedExpr>;
+    |$1: Vec<Rc<RefCell<ParsedExpr>>>, $2: Rc<RefCell<ParsedExpr>>| -> Vec<Rc<RefCell<ParsedExpr>>>;
       $1.push($2);
       $$ = $1
     }
   | /* empty */ {
-    || -> Vec<ParsedExpr>; 
+    || -> Vec<Rc<RefCell<ParsedExpr>>>; 
     $$ = Vec::new()
   }
   ;

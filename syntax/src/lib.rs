@@ -16,8 +16,8 @@ use std::collections::HashMap;
 enum SV {
     Undefined,
     _0(Token),
-    _1(ParsedExpr),
-    _2(Vec<ParsedExpr>)
+    _1(Rc<RefCell<ParsedExpr>>),
+    _2(Vec<Rc<RefCell<ParsedExpr>>>)
 }
 
 /**
@@ -153,8 +153,9 @@ lazy_static! {
 //
 
 use common::ParsedExpr;
+use std::{cell::RefCell, rc::Rc};
 
-type TResult = ParsedExpr;
+type TResult = Rc<RefCell<ParsedExpr>>;
 
 // ---  end of Module include ---------
 
@@ -733,7 +734,7 @@ fn _handler3(&mut self) -> SV {
 // Semantic values prologue.
 self.values_stack.pop();
 
-let __ = ParsedExpr::Number(self.tokenizer.yytext.parse::<isize>().unwrap());
+let __ = Rc::new(RefCell::new(ParsedExpr::Number(self.tokenizer.yytext.parse::<isize>().unwrap())));
 SV::_1(__)
 }
 
@@ -741,7 +742,7 @@ fn _handler4(&mut self) -> SV {
 // Semantic values prologue.
 self.values_stack.pop();
 
-let __ = ParsedExpr::String(self.tokenizer.yytext.to_string());
+let __ = Rc::new(RefCell::new(ParsedExpr::String(self.tokenizer.yytext.to_string())));
 SV::_1(__)
 }
 
@@ -749,18 +750,18 @@ fn _handler5(&mut self) -> SV {
 // Semantic values prologue.
 self.values_stack.pop();
 
-let __ = ParsedExpr::Symbol(self.tokenizer.yytext.to_string());
+let __ = Rc::new(RefCell::new(ParsedExpr::Symbol(self.tokenizer.yytext.to_string())));
 SV::_1(__)
 }
 
 fn _handler6(&mut self) -> SV {
 // Semantic values prologue.
 self.values_stack.pop();
-let mut _2 = self.values_stack.pop().unwrap();
+let mut _2 = pop!(self.values_stack, _2);
 self.values_stack.pop();
 
-let __ = _2;
-__
+let __ = Rc::new(RefCell::new(ParsedExpr::List(_2)));
+SV::_1(__)
 }
 
 fn _handler7(&mut self) -> SV {

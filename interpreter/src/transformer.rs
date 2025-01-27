@@ -1,4 +1,6 @@
-use common::Expr;
+use std::{cell::RefCell, rc::Rc};
+
+use common::{Expr, ParsedExpr};
 
 #[derive(Debug)]
 pub struct Transformer {}
@@ -6,6 +8,18 @@ pub struct Transformer {}
 impl Transformer {
   pub fn new() -> Self {
     Transformer {}
+  }
+
+  pub fn transform_parsed_params_to_strings(&self, params_parsed_expr: &Vec<Rc<RefCell<ParsedExpr>>>) -> Vec<String> {
+    params_parsed_expr
+      .iter()
+      .map(|param_parsed_exp| {
+        match &*param_parsed_exp.borrow() {
+            ParsedExpr::Symbol(param) => param.clone(),
+            _ => panic!("Function parameter must be a symbol")
+        }
+      })
+      .collect()
   }
 
   pub fn transform_def_to_var_lambda(&self, def_expr: Expr) -> Expr {
