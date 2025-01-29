@@ -187,15 +187,8 @@ impl Eva {
           Rc::clone(&env) // Closure
         )
       },
-      // Expr::CallExpression(func_name, args) => {
-      //   self.apply(Expr::Identifier(func_name.clone()), args, Rc::clone(&env))
-      // },
       Expr::ApplyExpression(func_expr, args) => {
         self.apply(*func_expr, args, Rc::clone(&env))
-      },
-      Expr::SwitchStatement(_) => {
-        // let if_expr = self.transformer.transform_switch_to_if(exp);
-        None
       },
     }
   }
@@ -237,6 +230,10 @@ impl Eva {
                 let consequent_expr = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env));
                 let alternate_expr = self.eval_parsed_expr(Rc::clone(&expr_list[3]), Rc::clone(&env));
                 Expr::IfExpression(Box::new(condition_expr), Box::new(consequent_expr), Box::new(alternate_expr))
+              },
+              "switch" => {
+                let if_parsed_expr = self.transformer.transform_switch_to_if(expr_list[1..].to_vec());
+                self.eval_parsed_expr(Rc::new(RefCell::new(if_parsed_expr)), env)
               },
               "while" => {
                 let condition_expr = self.eval_parsed_expr(Rc::clone(&expr_list[1]), Rc::clone(&env));
@@ -656,18 +653,42 @@ mod tests {
     "), None), Some(Value::Int(120)))
   }
 
-  // #[test]
-  // fn switch_statement() {
-  //   let mut eva = Eva::new();
-  //   let mut parser = Parser::new();
+    /**
+   *  [
+   *    RefCell { value: List([
+   *      RefCell { value: List([
+   *        RefCell { value: Symbol("==") }, 
+   *        RefCell { value: Symbol("x") }, 
+   *        RefCell { value: Number(10) }
+   *      ])}, 
+   *      RefCell { value: Number(100) }
+   *    ])}, 
+   *    RefCell { value: List([
+   *      RefCell { value: List([
+   *        RefCell { value: Symbol(">") }, 
+   *        RefCell { value: Symbol("x") }, 
+   *        RefCell { value: Number(10) }
+   *      ])}, 
+   *      RefCell { value: Number(200) }
+   *    ])}, 
+   *    RefCell { value: List([
+   *      RefCell { value: Symbol("else") }, 
+   *      RefCell { value: Number(300) }
+   *    ])}
+   *  ]
+   */
+  #[test]
+  fn switch_statement() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
 
-  //   assert_eq!(eva.eval(parser.parse("
-  //     (begin
-  //       (var x 10)
-  //       (switch ((== x 10) 100)
-  //               ((> x 10)  200)
-  //               (else      300))
-  //     )
-  //   "), None), Some(Value::Int(100)))
-  // }
+    assert_eq!(eva.eval(parser.parse("
+      (begin
+        (var x 10)
+        (switch ((== x 10) 100)
+                ((> x 10)  200)
+                (else      300))
+      )
+    "), None), Some(Value::Int(100)))
+  }
 }

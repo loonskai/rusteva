@@ -48,11 +48,9 @@ pub enum Expr {
     Assignment(String, Box<Expr>),
     IfExpression(Box<Expr>, Box<Expr>, Box<Expr>),
     WhileStatement(Box<Expr>, Box<Expr>),
-    // CallExpression(String, Vec<Expr>),
     FunctionDeclaration(String, Vec<String>, Box<Expr>),
     LambdaExpression(Vec<String>, Box<Expr>),
     ApplyExpression(Box<Expr>, Vec<Expr>),
-    SwitchStatement(Vec<Expr>),
 }
 
 
