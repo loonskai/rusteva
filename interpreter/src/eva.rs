@@ -653,30 +653,6 @@ mod tests {
     "), None), Some(Value::Int(120)))
   }
 
-    /**
-   *  [
-   *    RefCell { value: List([
-   *      RefCell { value: List([
-   *        RefCell { value: Symbol("==") }, 
-   *        RefCell { value: Symbol("x") }, 
-   *        RefCell { value: Number(10) }
-   *      ])}, 
-   *      RefCell { value: Number(100) }
-   *    ])}, 
-   *    RefCell { value: List([
-   *      RefCell { value: List([
-   *        RefCell { value: Symbol(">") }, 
-   *        RefCell { value: Symbol("x") }, 
-   *        RefCell { value: Number(10) }
-   *      ])}, 
-   *      RefCell { value: Number(200) }
-   *    ])}, 
-   *    RefCell { value: List([
-   *      RefCell { value: Symbol("else") }, 
-   *      RefCell { value: Number(300) }
-   *    ])}
-   *  ]
-   */
   #[test]
   fn switch_statement() {
     let mut eva = Eva::new();
