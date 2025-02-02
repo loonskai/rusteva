@@ -169,7 +169,7 @@ impl Eva {
           consequent_result = self.eval_expr(consequent.clone(), Rc::clone(&env));
           condition_result = self.eval_expr(condition.clone(), Rc::clone(&env));
         }
-        return consequent_result;
+        consequent_result
       },
       Expr::LambdaExpression(params, body) => {
         let func_obj = FuncObj::new(
@@ -239,7 +239,11 @@ impl Eva {
                 let condition_expr = self.eval_parsed_expr(Rc::clone(&expr_list[1]), Rc::clone(&env));
                 let consequent_expr = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env));
                 Expr::WhileStatement(Box::new(condition_expr), Box::new(consequent_expr))
-              }
+              },
+              "for" => {
+                let while_parsed_expr = self.transformer.transform_for_to_while(expr_list[1..].to_vec());
+                self.eval_parsed_expr(Rc::new(RefCell::new(while_parsed_expr)), env)
+              },
               "lambda" => {
                 if let ParsedExpr::List(ref params_parsed_expr) = *expr_list[1].borrow_mut() {
                   let func_params = self.transformer.transform_parsed_params_to_strings(&params_parsed_expr);
@@ -538,7 +542,7 @@ mod tests {
           (while
             (< counter 10)
             (begin
-              (set counter (+ result 1))
+              (set counter (+ counter 1))
               (set result (+ result 1))
             )
           )
@@ -666,5 +670,21 @@ mod tests {
                 (else      300))
       )
     "), None), Some(Value::Int(100)))
+  }
+
+  #[test]
+  fn for_loop() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
+
+    assert_eq!(eva.eval(parser.parse("
+    (begin
+        (var result 0)
+        (for (var counter 0) (< counter 10) (set counter (+ counter 1))
+          (set result (+ result 1))
+        )
+        result
+      )
+    "), None), Some(Value::Int(10)))
   }
 }

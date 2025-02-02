@@ -77,6 +77,25 @@ impl Transformer {
     ParsedExpr::List(Transformer::clone_list(&root_if_expr))
   }
 
+  pub fn transform_for_to_while(&self, expressions: Vec<Rc<RefCell<ParsedExpr>>>) -> ParsedExpr {
+    if expressions.len() != 4 {
+      panic!("Invalid for expression. Requires init, condition, modifier and expression")
+    }
+    ParsedExpr::List(vec![
+      Rc::new(RefCell::new(ParsedExpr::Symbol("begin".to_string()))),
+      Rc::clone(&expressions[0]), // init
+      Rc::new(RefCell::new(ParsedExpr::List(vec![
+        Rc::new(RefCell::new(ParsedExpr::Symbol("while".to_string()))),
+        Rc::clone(&expressions[1]), // condition
+        Rc::new(RefCell::new(ParsedExpr::List(vec![
+          Rc::new(RefCell::new(ParsedExpr::Symbol("begin".to_string()))),
+          Rc::clone(&expressions[3]), // expression
+          Rc::clone(&expressions[2]), // modifier
+        ]))),
+      ]))),
+    ])
+  }
+
   pub fn clone_list(expr: &Rc<RefCell<ParsedExpr>>) -> Vec<Rc<RefCell<ParsedExpr>>> {
     if let ParsedExpr::List(ref expr_list) = *expr.borrow() {
       expr_list.iter().map(|expr| Rc::clone(expr)).collect()
