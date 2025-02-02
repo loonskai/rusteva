@@ -31,45 +31,57 @@ impl Transformer {
   }
 
   pub fn transform_switch_to_if(&self, cases: Vec<Rc<RefCell<ParsedExpr>>>) -> ParsedExpr {
-    let mut if_vec = vec![
-      Rc::new(RefCell::new(ParsedExpr::String("if".to_string()))),
+    let if_vec = vec![
+      Rc::new(RefCell::new(ParsedExpr::Symbol("if".to_string()))),
       Rc::new(RefCell::new(ParsedExpr::String("".to_string()))), // condition placeholder
       Rc::new(RefCell::new(ParsedExpr::String("".to_string()))), // consequent placeholder
       Rc::new(RefCell::new(ParsedExpr::String("".to_string()))), // alternate placeholder
     ];
-    let mut current_if_vec = &mut if_vec;
+    let root_if_expr = Rc::new(RefCell::new(ParsedExpr::List(if_vec)));
+    let mut current_if_expr = Rc::clone(&root_if_expr);
     let cases_len = cases.len();
     for i in (0..cases_len - 1).step_by(2) {
+      // (switch <current> <next> ...)
       let ParsedExpr::List(ref current) = *cases[i].borrow() else {
         panic!("Invalid case statement")
       };
       let ParsedExpr::List(ref next) = *cases[i+1].borrow() else {
         panic!("Invalid case statement")
       };
-      
-      current_if_vec[1] = Rc::clone(&current[0]); // condition
-      current_if_vec[2] = Rc::clone(&current[1]); // consequent
-
+      if let ParsedExpr::List(ref mut current_if_vec) = *current_if_expr.borrow_mut() {
+        current_if_vec[1] = Rc::clone(&current[0]); // condition -> (if (condition) (???) (???))
+        current_if_vec[2] = Rc::clone(&current[1]); // consequent -> (if (condition) (consequent) (???))
+      }
       let next_condition = next[0].borrow();
       if let ParsedExpr::Symbol(ref next_condition_symbol) = *next_condition {
-        if next_condition_symbol == &"else".to_string() {
-          current_if_vec[3] = Rc::clone(&next[1]); // next block
-        } 
-      } else {
-        let new_if_vec = vec![
-          Rc::new(RefCell::new(ParsedExpr::String("if".to_string()))),
-          Rc::new(RefCell::new(ParsedExpr::String("".to_string()))), // condition placeholder
-          Rc::new(RefCell::new(ParsedExpr::String("".to_string()))), // consequent placeholder
-          Rc::new(RefCell::new(ParsedExpr::String("".to_string()))), // alternate placeholder
-        ];
-        let new_if_cell = Rc::new(RefCell::new(ParsedExpr::List(new_if_vec)));
-        current_if_vec[3] = Rc::clone(&new_if_cell);
-        // FIXME
-        if let ParsedExpr::List(ref mut next_if_vec) = *new_if_cell.borrow_mut() {
-          current_if_vec = next_if_vec;
-        };
+        if next_condition_symbol == "else" {
+          if let ParsedExpr::List(ref mut current_if_vec) = *current_if_expr.borrow_mut() {
+            current_if_vec[3] = Rc::clone(&next[1]); // alternate -> (if (condition) (consequent) (alternate))
+            break;
+          }
+        }
       }
+      // Start building nested "if" as an alternate for current condition
+      let new_if_vec = vec![
+        Rc::new(RefCell::new(ParsedExpr::Symbol("if".to_string()))),
+        Rc::new(RefCell::new(ParsedExpr::String("".to_string()))), // condition placeholder
+        Rc::new(RefCell::new(ParsedExpr::String("".to_string()))), // consequent placeholder
+        Rc::new(RefCell::new(ParsedExpr::String("".to_string()))), // alternate placeholder
+      ];
+      let new_if_expr = Rc::new(RefCell::new(ParsedExpr::List(new_if_vec)));
+      if let ParsedExpr::List(ref mut current_if_vec) = *current_if_expr.borrow_mut() {
+        current_if_vec[3] = Rc::clone(&new_if_expr); // alternate -> (if (condition) (consequent) (if (???) (???) (???)))
+      }
+      current_if_expr = Rc::clone(&new_if_expr);
     }
-    ParsedExpr::List(if_vec)
+    ParsedExpr::List(Transformer::clone_list(&root_if_expr))
+  }
+
+  pub fn clone_list(expr: &Rc<RefCell<ParsedExpr>>) -> Vec<Rc<RefCell<ParsedExpr>>> {
+    if let ParsedExpr::List(ref expr_list) = *expr.borrow() {
+      expr_list.iter().map(|expr| Rc::clone(expr)).collect()
+    } else {
+      panic!("Expected ParsedExpr::List")
+    }
   }
 }

@@ -66,7 +66,7 @@ mod tests {
       assert!(matches!(x, Ok(Value::Int(10))));
 
       let x = env.define(&"x".to_string(), Value::Int(10));
-      assert!(matches!(x, Err(RuntimeErrorKind)));
+      assert!(matches!(x, Err(_)));
 
       let x = env.lookup(&"x".to_string());
       assert!(matches!(x, Ok(Value::Int(10))));
