@@ -263,6 +263,20 @@ impl Eva {
                 }
                 panic!("Invalid function declaration")
               },
+              "++" => {
+                let assignment_expr = self.transformer.transform_math_to_assignment(
+                  Rc::clone(&expr_list[1]),
+                  "+".to_string()
+                );
+                self.eval_parsed_expr(Rc::new(RefCell::new(assignment_expr)), env)
+              },
+              "--" => {
+                let assignment_expr = self.transformer.transform_math_to_assignment(
+                  Rc::clone(&expr_list[1]),
+                  "-".to_string()
+                );
+                self.eval_parsed_expr(Rc::new(RefCell::new(assignment_expr)), env)
+              },
               _ => self.call(&expr_list, Rc::clone(&env))
             }
           },
@@ -680,11 +694,39 @@ mod tests {
     assert_eq!(eva.eval(parser.parse("
     (begin
         (var result 0)
-        (for (var counter 0) (< counter 10) (set counter (+ counter 1))
-          (set result (+ result 1))
+        (for (var counter 0) (< counter 10) (++ counter)
+          (++ result 1)
         )
         result
       )
     "), None), Some(Value::Int(10)))
+  }
+
+  #[test]
+  fn increment_operator() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
+
+    assert_eq!(eva.eval(parser.parse("
+      (begin
+        (var result 0)
+        (++ result)
+        result
+      )
+    "), None), Some(Value::Int(1)))
+  }
+
+  #[test]
+  fn decrement_operator() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
+
+    assert_eq!(eva.eval(parser.parse("
+      (begin
+        (var result 0)
+        (-- result)
+        result
+      )
+    "), None), Some(Value::Int(-1)))
   }
 }

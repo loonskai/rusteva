@@ -96,6 +96,18 @@ impl Transformer {
     ])
   }
 
+  pub fn transform_math_to_assignment(&self, identifier_expr: Rc<RefCell<ParsedExpr>>, operator: String) -> ParsedExpr {
+    ParsedExpr::List(vec![
+      Rc::new(RefCell::new(ParsedExpr::Symbol("set".to_string()))),
+      Rc::clone(&identifier_expr),
+      Rc::new(RefCell::new(ParsedExpr::List(vec![
+        Rc::new(RefCell::new(ParsedExpr::Symbol(operator))),
+        Rc::clone(&identifier_expr),
+        Rc::new(RefCell::new(ParsedExpr::Number(1)))
+      ]))),
+    ])
+  }
+
   pub fn clone_list(expr: &Rc<RefCell<ParsedExpr>>) -> Vec<Rc<RefCell<ParsedExpr>>> {
     if let ParsedExpr::List(ref expr_list) = *expr.borrow() {
       expr_list.iter().map(|expr| Rc::clone(expr)).collect()
