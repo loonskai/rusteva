@@ -35,7 +35,8 @@ pub enum Value {
     Str(String),
     Null,
     Boolean(bool),
-    Function(FuncObj)
+    Function(FuncObj),
+    Env(Rc<RefCell<Environment>>)
 }
 
 #[derive(Debug,PartialEq,Clone)]
@@ -45,12 +46,15 @@ pub enum Expr {
     VariableDeclaration(String, Box<Expr>),
     Identifier(String),
     BlockStatement(Vec<Expr>),
-    Assignment(String, Box<Expr>),
+    Assignment(String, Box<Expr>, Rc<RefCell<Environment>>),
     IfExpression(Box<Expr>, Box<Expr>, Box<Expr>),
     WhileStatement(Box<Expr>, Box<Expr>),
     FunctionDeclaration(String, Vec<String>, Box<Expr>),
     LambdaExpression(Vec<String>, Box<Expr>),
     ApplyExpression(Box<Expr>, Vec<Expr>),
+    ClassDeclaration(String, Box<Expr>, Box<Expr>),
+    NewExpression(String, Vec<Expr>),
+    MemberExpression(String, String)
 }
 
 

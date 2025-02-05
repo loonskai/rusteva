@@ -72,6 +72,7 @@ impl Eva {
           },
           Value::Boolean(b) => Some(Value::Boolean(b)),
           Value::Function(f) => Some(Value::Function(f)),
+          Value::Env(e) => Some(Value::Env(e)),
           Value::Null => Some(Value::Null)
         }
       },
@@ -133,7 +134,7 @@ impl Eva {
         }
         panic!("Unable to declare variable")
       },
-      Expr::Assignment(id, expr) => {
+      Expr::Assignment(id, expr, current_env) => {
         let result = self.eval_expr(*expr, Rc::clone(&env)).map_or(Value::Null, |value| value);
         let _ = env.borrow_mut().set(&id, result.clone());
         Some(result)
@@ -190,6 +191,43 @@ impl Eva {
       Expr::ApplyExpression(func_expr, args) => {
         self.apply(*func_expr, args, Rc::clone(&env))
       },
+      Expr::ClassDeclaration(class_name, parent_class_expr, body) => {
+        let parent_env = self.eval_expr(*parent_class_expr, Rc::clone(&env))
+          .map(|parent_class| match parent_class {
+            Value::Function(parent_func_obj) => parent_func_obj.env,
+            _ => panic!("Invalid parent class value. Must be a function object.")
+            })
+          .unwrap_or_else(|| Rc::clone(&env));
+        let class_env = Rc::new(RefCell::new(Environment::new(Some(parent_env))));
+        self.eval_expr(*body, Rc::clone(&class_env)).expect("Cannot evaluate class body");
+        self.eval_expr(
+            Expr::VariableDeclaration(
+              class_name, 
+              Box::new(Expr::Literal(Value::Env(Rc::clone(&class_env))))
+            ), 
+            Rc::clone(&env)
+          )
+      },
+      Expr::NewExpression(class_name, mut args) => {
+        if let Value::Env(class_env)  = self.eval_expr(Expr::Identifier(class_name), Rc::clone(&env)).expect("Class is not defined") {
+          let instance_env = Rc::new(RefCell::new(Environment::new(Some(class_env))));
+          let mut args_with_self = vec![Expr::Literal(Value::Env(instance_env))];
+          args_with_self.append(&mut args);
+          self.apply(Expr::Identifier("constructor".to_string()), args_with_self, env)
+        } else {
+          panic!("Invalid class value")
+        }
+      },
+      Expr::MemberExpression(instance_name, id) => {
+        if let Value::Env(instance_env) = self.eval_expr(Expr::Identifier(instance_name), Rc::clone(&env)).expect("Instance not founc") {
+          match instance_env.borrow().lookup(&id) {
+            Ok(value) => Some(value.clone()),
+            Err(err) => panic!("{:?}", err)
+          }
+        } else {
+          panic!("Invalid instance value")
+        }
+      }
     }
   }
 
@@ -218,12 +256,44 @@ impl Eva {
                 panic!("Invalid variable declaration")
               },
               "set" => {
-                let var_name_expr = self.eval_parsed_expr(Rc::clone(&expr_list[1]), Rc::clone(&env));
-                if let Expr::Identifier(var_name) = var_name_expr {
-                  let var_value_expr = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env));
-                  return Expr::Assignment(var_name, Box::new(var_value_expr));
+                match &*expr_list[1].borrow() {
+                  // foo
+                  ParsedExpr::Symbol(var_name) => {
+                    let value_expr = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env));
+                    return Expr::Assignment(var_name.clone(), Box::new(value_expr), Rc::clone(&env));
+                  },
+                  ParsedExpr::List(parsed_expr_list) => {
+                    if let Expr::Identifier(parsed_id) = self.eval_parsed_expr(Rc::clone(&parsed_expr_list[0]), Rc::clone(&env)) {
+                       // (prop this foo)
+                      if parsed_id == "prop".to_string() {
+                        let value_expr = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env));
+                        let instance_id_expr = self.eval_parsed_expr(Rc::clone(&parsed_expr_list[1]), Rc::clone(&env));
+                        // FIXME
+                        if let Value::Env(instance_env) = self.eval_expr(instance_id_expr, env).expect("Instance not found") {
+                          if let Expr::Literal(instance_member_expr) = self.eval_parsed_expr(Rc::clone(&parsed_expr_list[2]), Rc::clone(&instance_env)) {
+                            if let Value::Str(instance_member_name) = instance_member_expr {
+                              let value = self.eval_expr(value_expr, Rc::clone(&instance_env)).expect("Invalid member value");
+                              let foo = instance_env.borrow_mut().set(&instance_member_name, value).ok().expect("Unable to set member value");
+                              return Expr::Literal(foo);
+                              // return Expr::Assignment(instance_member_name.clone(), Box::new(value_expr), Rc::clone(&instance_env));
+                            } else {
+                              panic!("Invalid assignment")
+                            }
+                          } else {
+                            panic!("Invalid assignment")
+                          }
+                        } else {
+                          panic!("Invalid assignment: Expr::Literal(instance_value)")
+                        }
+                      } else {
+                        panic!("parsed_id == prop.to_string()")
+                      }
+                    } else {
+                      panic!("Invalid assignment: Expr::Identifier(parsed_id)")
+                    }
+                  },
+                  _ => panic!("Invalid assignment: invalid expr_list[1]")
                 }
-                panic!("Invalid assignment")
               },
               "if" => {
                 let condition_expr = self.eval_parsed_expr(Rc::clone(&expr_list[1]), Rc::clone(&env));
@@ -262,6 +332,34 @@ impl Eva {
                   }
                 }
                 panic!("Invalid function declaration")
+              },
+              "class" => {
+                let class_name_expr = self.eval_parsed_expr(Rc::clone(&expr_list[1]), Rc::clone(&env));
+                let parent_class_name_expr = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env));
+                let body_expr = self.eval_parsed_expr(Rc::clone(&expr_list[3]), Rc::clone(&env));
+                if let Expr::Identifier(class_name ) = class_name_expr {
+                  return Expr::ClassDeclaration(class_name, Box::new(parent_class_name_expr), Box::new(body_expr));
+                }
+                panic!("Invalid class declaration!")
+              },
+              "new" => {
+                let class_name_expr = self.eval_parsed_expr(Rc::clone(&expr_list[1]), Rc::clone(&env));
+                if let Expr::Identifier(class_name ) = class_name_expr {
+                  let arg_expressions: Vec<Expr> = expr_list[1..]
+                    .iter()
+                    .map(|expr| self.eval_parsed_expr(Rc::clone(&expr), Rc::clone(&env)))
+                    .collect();
+                  return Expr::NewExpression(class_name, arg_expressions);
+                }
+                panic!("Invalid class instantiation!")
+              },
+              "prop" => {
+                if let Expr::Identifier(instance_name) = self.eval_parsed_expr(Rc::clone(&expr_list[1]), Rc::clone(&env)) {
+                  if let Expr::Identifier(id) = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env)) {
+                    return Expr::MemberExpression(instance_name, id);
+                  }
+                }
+                panic!("Invalid member expression!")
               },
               "++" => {
                 let assignment_expr = self.transformer.transform_math_to_assignment(
@@ -728,5 +826,34 @@ mod tests {
         result
       )
     "), None), Some(Value::Int(-1)))
+  }
+
+  #[test]
+  fn classes() {
+    let mut eva = Eva::new();
+    let mut parser = Parser::new();
+
+    assert_eq!(eva.eval(parser.parse("
+      (begin
+        (class Point null
+          (begin
+            (def constructor (this x y)
+              (begin
+                (set (prop this x) x)
+                (set (prop this y) y)
+              )
+            )
+
+            (def calc (this)
+              (begin
+                (+ (prop this x) (prop this y))
+              )
+            )
+          )
+        )
+        (var p (new Point 10 20))
+        ((prop p calc) p)
+      )
+    "), None), Some(Value::Int(30)))
   }
 }
