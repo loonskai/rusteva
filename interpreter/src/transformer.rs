@@ -22,12 +22,8 @@ impl Transformer {
       .collect()
   }
 
-  pub fn transform_def_to_var_lambda(&self, def_expr: Expr) -> Expr {
-    if let Expr::FunctionDeclaration(func_name, params, body) = def_expr {
-      Expr::VariableDeclaration(func_name, Box::new(Expr::LambdaExpression(params, body)))
-    } else {
-      panic!("Invalid def expression")
-    }
+  pub fn transform_def_to_var_lambda(&self, func_name: String, func_params: Vec<String>, func_body: Box<Expr>) -> Expr {
+    Expr::VariableDeclaration(func_name, Box::new(Expr::LambdaExpression(func_params, func_body)))
   }
 
   pub fn transform_switch_to_if(&self, cases: Vec<Rc<RefCell<ParsedExpr>>>) -> ParsedExpr {

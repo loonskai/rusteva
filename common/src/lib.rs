@@ -46,7 +46,7 @@ pub enum Expr {
     VariableDeclaration(String, Box<Expr>),
     Identifier(String),
     BlockStatement(Vec<Expr>),
-    Assignment(String, Box<Expr>, Rc<RefCell<Environment>>),
+    Assignment(String, Box<Expr>),
     IfExpression(Box<Expr>, Box<Expr>, Box<Expr>),
     WhileStatement(Box<Expr>, Box<Expr>),
     FunctionDeclaration(String, Vec<String>, Box<Expr>),

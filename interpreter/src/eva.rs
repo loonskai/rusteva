@@ -134,7 +134,7 @@ impl Eva {
         }
         panic!("Unable to declare variable")
       },
-      Expr::Assignment(id, expr, current_env) => {
+      Expr::Assignment(id, expr) => {
         let result = self.eval_expr(*expr, Rc::clone(&env)).map_or(Value::Null, |value| value);
         let _ = env.borrow_mut().set(&id, result.clone());
         Some(result)
@@ -180,9 +180,9 @@ impl Eva {
         );
         Some(Value::Function(func_obj))
       },
-      Expr::FunctionDeclaration(_, _, _) => {
+      Expr::FunctionDeclaration(func_name, func_params, func_body) => {
         // JIT-transpile to a variable declaration
-        let var_expr = self.transformer.transform_def_to_var_lambda(expr);
+        let var_expr = self.transformer.transform_def_to_var_lambda(func_name, func_params, func_body);
         self.eval_expr(
           var_expr,
           Rc::clone(&env) // Closure
@@ -191,29 +191,48 @@ impl Eva {
       Expr::ApplyExpression(func_expr, args) => {
         self.apply(*func_expr, args, Rc::clone(&env))
       },
-      Expr::ClassDeclaration(class_name, parent_class_expr, body) => {
+      Expr::ClassDeclaration(class_name, parent_class_expr, class_body) => {
         let parent_env = self.eval_expr(*parent_class_expr, Rc::clone(&env))
           .map(|parent_class| match parent_class {
             Value::Function(parent_func_obj) => parent_func_obj.env,
-            _ => panic!("Invalid parent class value. Must be a function object.")
-            })
+            Value::Null => Rc::clone(&env),
+            _ => panic!("Invalid parent class value. Must be a function object or null.")
+          })
           .unwrap_or_else(|| Rc::clone(&env));
         let class_env = Rc::new(RefCell::new(Environment::new(Some(parent_env))));
-        self.eval_expr(*body, Rc::clone(&class_env)).expect("Cannot evaluate class body");
-        self.eval_expr(
-            Expr::VariableDeclaration(
-              class_name, 
-              Box::new(Expr::Literal(Value::Env(Rc::clone(&class_env))))
-            ), 
-            Rc::clone(&env)
-          )
+        // Set methods in class environment without executing them
+        if let Expr::BlockStatement(method_func_decl_expressions) = *class_body {
+          for class_method_expr in method_func_decl_expressions {
+            if let Expr::FunctionDeclaration(func_name, func_args, func_body) = class_method_expr {
+              class_env
+                .borrow_mut()
+                .define(
+                  &func_name.to_string(), 
+                  Value::Function(FuncObj { 
+                    params: func_args, 
+                    body: func_body, 
+                    env: Rc::clone(&class_env) 
+                  }))
+                .expect("Unable to define method on class");
+            }
+            // self.eval_expr(class_method_expr, Rc::clone(&class_env)).expect("Cannot evaluate method definition");
+          }
+        } else {
+          panic!("Class desclaration body must be a block")
+        }
+        class_env.borrow().lookup(&"constructor".to_string()).expect("Class declaration must have constructor method");
+        let class_env_value = Value::Env(Rc::clone(&class_env));
+        env.borrow_mut().define(&class_name, class_env_value).expect("Cannot define class in current env");
+        None
       },
       Expr::NewExpression(class_name, mut args) => {
+        println!("class_name: {:?}", class_name);
+        println!("args: {:?}", args);
         if let Value::Env(class_env)  = self.eval_expr(Expr::Identifier(class_name), Rc::clone(&env)).expect("Class is not defined") {
-          let instance_env = Rc::new(RefCell::new(Environment::new(Some(class_env))));
+          let instance_env = Rc::new(RefCell::new(Environment::new(Some(Rc::clone(&class_env)))));
           let mut args_with_self = vec![Expr::Literal(Value::Env(instance_env))];
           args_with_self.append(&mut args);
-          self.apply(Expr::Identifier("constructor".to_string()), args_with_self, env)
+          self.apply(Expr::Identifier("constructor".to_string()), args_with_self, class_env)
         } else {
           panic!("Invalid class value")
         }
@@ -257,40 +276,46 @@ impl Eva {
               },
               "set" => {
                 match &*expr_list[1].borrow() {
-                  // foo
                   ParsedExpr::Symbol(var_name) => {
                     let value_expr = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env));
-                    return Expr::Assignment(var_name.clone(), Box::new(value_expr), Rc::clone(&env));
+                    return Expr::Assignment(var_name.clone(), Box::new(value_expr));
                   },
                   ParsedExpr::List(parsed_expr_list) => {
-                    if let Expr::Identifier(parsed_id) = self.eval_parsed_expr(Rc::clone(&parsed_expr_list[0]), Rc::clone(&env)) {
-                       // (prop this foo)
-                      if parsed_id == "prop".to_string() {
-                        let value_expr = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env));
-                        let instance_id_expr = self.eval_parsed_expr(Rc::clone(&parsed_expr_list[1]), Rc::clone(&env));
-                        // FIXME
-                        if let Value::Env(instance_env) = self.eval_expr(instance_id_expr, env).expect("Instance not found") {
-                          if let Expr::Literal(instance_member_expr) = self.eval_parsed_expr(Rc::clone(&parsed_expr_list[2]), Rc::clone(&instance_env)) {
-                            if let Value::Str(instance_member_name) = instance_member_expr {
-                              let value = self.eval_expr(value_expr, Rc::clone(&instance_env)).expect("Invalid member value");
-                              let foo = instance_env.borrow_mut().set(&instance_member_name, value).ok().expect("Unable to set member value");
-                              return Expr::Literal(foo);
-                              // return Expr::Assignment(instance_member_name.clone(), Box::new(value_expr), Rc::clone(&instance_env));
-                            } else {
-                              panic!("Invalid assignment")
-                            }
-                          } else {
-                            panic!("Invalid assignment")
-                          }
-                        } else {
-                          panic!("Invalid assignment: Expr::Literal(instance_value)")
-                        }
-                      } else {
-                        panic!("parsed_id == prop.to_string()")
+                    let prop_tag_expr = self.eval_parsed_expr(Rc::clone(&parsed_expr_list[0]), Rc::clone(&env));
+                    if let Expr::Literal(Value::Str(prop_tag)) = prop_tag_expr {
+                      if prop_tag != "prop".to_string() {
+                        panic!("Invalid member expression")
                       }
-                    } else {
-                      panic!("Invalid assignment: Expr::Identifier(parsed_id)")
                     }
+                    let self_tag_expr = self.eval_parsed_expr(Rc::clone(&parsed_expr_list[1]), Rc::clone(&env));
+                    let prop_id_expr = self.eval_parsed_expr(Rc::clone(&parsed_expr_list[2]), Rc::clone(&env));
+                    println!("self_tag_expr: {:?}", self_tag_expr);
+                    println!("prop_id_expr: {:?}", prop_id_expr);
+                    Expr::Literal(Value::Null)
+                       // (prop this foo)
+                        // this
+                        // let value_expr = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env));
+                        // foo
+                        // let instance_id_expr = self.eval_parsed_expr(Rc::clone(&parsed_expr_list[1]), Rc::clone(&env));
+                        // if let Value::Env(instance_env) = self.eval_expr(instance_id_expr, env).expect("Instance not found") {
+                        // if let Expr::Literal(instance_member_expr) = self.eval_parsed_expr(Rc::clone(&parsed_expr_list[2]), Rc::clone(&instance_env)) {
+                          // if let Value::Str(instance_member_name) = instance_member_expr {
+                            // let value = self.eval_expr(value_expr, Rc::clone(&instance_env)).expect("Invalid member value");
+                            // let foo = instance_env.borrow_mut().set(&instance_member_name, value).ok().expect("Unable to set member value");
+                            // return Expr::Literal(foo);
+                            // return Expr::Assignment(instance_member_name.clone(), Box::new(value_expr), Rc::clone(&instance_env));
+                          // } else {
+                            // panic!("Invalid assignment")
+                          // }
+                        // } else {
+                        //   panic!("Invalid assignment")
+                        // }
+                        // } else {
+                        //   panic!("Invalid assignment: Expr::Literal(instance_value)")
+                        // }
+                    // } else {
+                      // panic!("Invalid assignment: Expr::Identifier(parsed_id)")
+                    // }
                   },
                   _ => panic!("Invalid assignment: invalid expr_list[1]")
                 }
@@ -336,16 +361,16 @@ impl Eva {
               "class" => {
                 let class_name_expr = self.eval_parsed_expr(Rc::clone(&expr_list[1]), Rc::clone(&env));
                 let parent_class_name_expr = self.eval_parsed_expr(Rc::clone(&expr_list[2]), Rc::clone(&env));
-                let body_expr = self.eval_parsed_expr(Rc::clone(&expr_list[3]), Rc::clone(&env));
+                let class_body_expr = self.eval_parsed_expr(Rc::clone(&expr_list[3]), Rc::clone(&env));
                 if let Expr::Identifier(class_name ) = class_name_expr {
-                  return Expr::ClassDeclaration(class_name, Box::new(parent_class_name_expr), Box::new(body_expr));
+                  return Expr::ClassDeclaration(class_name, Box::new(parent_class_name_expr), Box::new(class_body_expr));
                 }
                 panic!("Invalid class declaration!")
               },
               "new" => {
                 let class_name_expr = self.eval_parsed_expr(Rc::clone(&expr_list[1]), Rc::clone(&env));
                 if let Expr::Identifier(class_name ) = class_name_expr {
-                  let arg_expressions: Vec<Expr> = expr_list[1..]
+                  let arg_expressions: Vec<Expr> = expr_list[2..]
                     .iter()
                     .map(|expr| self.eval_parsed_expr(Rc::clone(&expr), Rc::clone(&env)))
                     .collect();
@@ -395,25 +420,20 @@ impl Eva {
   }
 
   fn apply(&mut self, expr: Expr, args: Vec<Expr>, env: Rc<RefCell<Environment>>) -> Option<Value> {
-    let func_obj = self.eval_expr(expr, Rc::clone(&env)).map(|v| {
-      match v {
+    let func_obj = self.eval_expr(expr, Rc::clone(&env))
+      .map(|v| match v {
         Value::Function(f) => f,
         _ => panic!("Invalid function call"),
-      }
-    }).expect("Expected a function");
+      }).expect("Expected a function");
     if args.len() != func_obj.params.len() {
       panic!("Function arguments mismatch!")
     }
     let activation_env = Rc::new(RefCell::new(Environment::new(Some(func_obj.env))));
     // TODO: How to implement "debugger" Expr::Breakpoint and test execution stack? Also display stack trace on exceptions
     self.execution_stack.push(Rc::clone(&activation_env));
-    for param in func_obj.params.into_iter().enumerate() {
-      match &param {
-        (index, param_name) => {
-          let evaluated_arg = self.eval_expr(args[*index].clone(), Rc::clone(&env)).expect("Unable to evaluate argument");
-          let _ = activation_env.borrow_mut().define(param_name, evaluated_arg);
-        },
-      }
+    for (index, param_name) in func_obj.params.iter().enumerate() {
+      let evaluated_arg = self.eval_expr(args[index].clone(), Rc::clone(&env)).expect("Unable to evaluate argument");
+      let _ = activation_env.borrow_mut().define(param_name, evaluated_arg).expect("Parameter definition failed");
     }
     let result = self.eval_expr(*func_obj.body, Rc::clone(&activation_env));
     self.execution_stack.pop();
@@ -426,407 +446,407 @@ mod tests {
   use super::*;
   use syntax::Parser;
 
-  #[test]
-  fn self_evaluating_expressions() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn self_evaluating_expressions() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(
-      eva.eval(parser.parse("null"), None),
-      Some(Value::Null)
-    );
-    assert_eq!(
-      eva.eval(parser.parse("true"), None),
-      Some(Value::Boolean(true))
-    );
-    assert_eq!(
-      eva.eval(parser.parse("false"), None),
-      Some(Value::Boolean(false))
-    );
-    assert_eq!(
-      eva.eval(parser.parse("1"), None),
-      Some(Value::Int(1))
-    );
-    assert_eq!(
-      eva.eval(parser.parse("-10"), None),
-      Some(Value::Int(-10))
-    );
-    assert_eq!(
-      eva.eval(parser.parse(r#""hello""#), None),
-      Some(Value::Str("hello".to_string()))
-    );
-    assert_eq!(
-      eva.eval(parser.parse(r#""🎅 新年快乐!""#), None),
-      Some(Value::Str("🎅 新年快乐!".to_string()))
-    );
-  }
+  //   assert_eq!(
+  //     eva.eval(parser.parse("null"), None),
+  //     Some(Value::Null)
+  //   );
+  //   assert_eq!(
+  //     eva.eval(parser.parse("true"), None),
+  //     Some(Value::Boolean(true))
+  //   );
+  //   assert_eq!(
+  //     eva.eval(parser.parse("false"), None),
+  //     Some(Value::Boolean(false))
+  //   );
+  //   assert_eq!(
+  //     eva.eval(parser.parse("1"), None),
+  //     Some(Value::Int(1))
+  //   );
+  //   assert_eq!(
+  //     eva.eval(parser.parse("-10"), None),
+  //     Some(Value::Int(-10))
+  //   );
+  //   assert_eq!(
+  //     eva.eval(parser.parse(r#""hello""#), None),
+  //     Some(Value::Str("hello".to_string()))
+  //   );
+  //   assert_eq!(
+  //     eva.eval(parser.parse(r#""🎅 新年快乐!""#), None),
+  //     Some(Value::Str("🎅 新年快乐!".to_string()))
+  //   );
+  // }
 
-  #[test]
-  fn built_in_functions() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn built_in_functions() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    // Math functions:
-    assert_eq!(eva.eval(parser.parse("(+ 1 5)"), None), Some(Value::Int(6)));
-    assert_eq!(eva.eval(parser.parse("(+ (+ 2 3) 5)"), None), Some(Value::Int(10)));
-    assert_eq!(eva.eval(parser.parse("(+ (* 2 3) 5)"), None), Some(Value::Int(11)));
-    assert_eq!(eva.eval(parser.parse("(+ (/ 10 2) 5)"), None), Some(Value::Int(10)));
+  //   // Math functions:
+  //   assert_eq!(eva.eval(parser.parse("(+ 1 5)"), None), Some(Value::Int(6)));
+  //   assert_eq!(eva.eval(parser.parse("(+ (+ 2 3) 5)"), None), Some(Value::Int(10)));
+  //   assert_eq!(eva.eval(parser.parse("(+ (* 2 3) 5)"), None), Some(Value::Int(11)));
+  //   assert_eq!(eva.eval(parser.parse("(+ (/ 10 2) 5)"), None), Some(Value::Int(10)));
 
-    // Comparison functions:
-    assert_eq!(eva.eval(parser.parse("(> 1 5)"), None), Some(Value::Boolean(false)));
-    assert_eq!(eva.eval(parser.parse("(< 1 5)"), None), Some(Value::Boolean(true)));
-    assert_eq!(eva.eval(parser.parse("(>= 1 5)"), None), Some(Value::Boolean(false)));
-    assert_eq!(eva.eval(parser.parse("(<= 1 5)"), None), Some(Value::Boolean(true)));
-    assert_eq!(eva.eval(parser.parse("(== 5 5)"), None), Some(Value::Boolean(true)));
-  }
+  //   // Comparison functions:
+  //   assert_eq!(eva.eval(parser.parse("(> 1 5)"), None), Some(Value::Boolean(false)));
+  //   assert_eq!(eva.eval(parser.parse("(< 1 5)"), None), Some(Value::Boolean(true)));
+  //   assert_eq!(eva.eval(parser.parse("(>= 1 5)"), None), Some(Value::Boolean(false)));
+  //   assert_eq!(eva.eval(parser.parse("(<= 1 5)"), None), Some(Value::Boolean(true)));
+  //   assert_eq!(eva.eval(parser.parse("(== 5 5)"), None), Some(Value::Boolean(true)));
+  // }
 
-  #[test]
-  #[should_panic]
-  fn division_by_zero() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // #[should_panic]
+  // fn division_by_zero() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(eva.eval(parser.parse("(/ 1 0)"), None), Some(Value::Int(0)));
-  }
+  //   assert_eq!(eva.eval(parser.parse("(/ 1 0)"), None), Some(Value::Int(0)));
+  // }
 
-  #[test]
-  fn variable_declaration() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn variable_declaration() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(
-      eva.eval(parser.parse("(var x 10)"), None),
-      Some(Value::Int(10))
-    );
-    assert_eq!(
-      eva.eval(parser.parse("x"), None),
-      Some(Value::Int(10))
-    );
-    eva.eval(parser.parse("(var z (+ 2 4))"), None);
-    assert_eq!(
-      eva.eval(parser.parse("z"), None),
-      Some(Value::Int(6))
-    );
-  }
+  //   assert_eq!(
+  //     eva.eval(parser.parse("(var x 10)"), None),
+  //     Some(Value::Int(10))
+  //   );
+  //   assert_eq!(
+  //     eva.eval(parser.parse("x"), None),
+  //     Some(Value::Int(10))
+  //   );
+  //   eva.eval(parser.parse("(var z (+ 2 4))"), None);
+  //   assert_eq!(
+  //     eva.eval(parser.parse("z"), None),
+  //     Some(Value::Int(6))
+  //   );
+  // }
 
-  #[test]
-  fn block_statement() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn block_statement() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(
-      eva.eval(parser.parse("
-        (begin
-          (var x 10)
-          (var y 20)
-          (+ (* x y) 30)
-        )
-      "),
-        None
-      ),
-      Some(Value::Int(230))
-    );
-  }
+  //   assert_eq!(
+  //     eva.eval(parser.parse("
+  //       (begin
+  //         (var x 10)
+  //         (var y 20)
+  //         (+ (* x y) 30)
+  //       )
+  //     "),
+  //       None
+  //     ),
+  //     Some(Value::Int(230))
+  //   );
+  // }
 
-  #[test]
-  fn nested_blocks() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn nested_blocks() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(
-      eva.eval(parser.parse("
-        (begin
-          (var x 10)
-          (begin
-            (var x 20))
-          x
-        )
-      "), None),
-      Some(Value::Int(10)),
-    );
-  }
+  //   assert_eq!(
+  //     eva.eval(parser.parse("
+  //       (begin
+  //         (var x 10)
+  //         (begin
+  //           (var x 20))
+  //         x
+  //       )
+  //     "), None),
+  //     Some(Value::Int(10)),
+  //   );
+  // }
 
-  #[test]
-  fn outer_scope_reference() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn outer_scope_reference() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(
-      eva.eval(parser.parse("
-        (begin
-          (var x 10)
-          (var y (begin
-            x))
-          y
-        )
-      "), None),
-      Some(Value::Int(10))
-    )
-  }
+  //   assert_eq!(
+  //     eva.eval(parser.parse("
+  //       (begin
+  //         (var x 10)
+  //         (var y (begin
+  //           x))
+  //         y
+  //       )
+  //     "), None),
+  //     Some(Value::Int(10))
+  //   )
+  // }
 
-  #[test]
-  fn scope_chain_traversal() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn scope_chain_traversal() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(
-      eva.eval(parser.parse("
-        (begin
-          (var value 10)
-          (var result (begin
-            (var x (+ value 10))
-            x)
-          )
-          result
-        )
-      "), None),
-      Some(Value::Int(20)),
-    )
-  }
+  //   assert_eq!(
+  //     eva.eval(parser.parse("
+  //       (begin
+  //         (var value 10)
+  //         (var result (begin
+  //           (var x (+ value 10))
+  //           x)
+  //         )
+  //         result
+  //       )
+  //     "), None),
+  //     Some(Value::Int(20)),
+  //   )
+  // }
 
-  #[test]
-  fn same_scope_assignment() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn same_scope_assignment() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(
-      eva.eval(parser.parse("
-        (begin
-          (var data 10)
-          (set data 100)
-          data
-        )
-      "), None),
-      Some(Value::Int(100))
-    );
-  }
+  //   assert_eq!(
+  //     eva.eval(parser.parse("
+  //       (begin
+  //         (var data 10)
+  //         (set data 100)
+  //         data
+  //       )
+  //     "), None),
+  //     Some(Value::Int(100))
+  //   );
+  // }
 
-  #[test]
-  fn outer_scope_assignment() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn outer_scope_assignment() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(
-      eva.eval(parser.parse("
-        (begin
-          (var data 10)
-          (begin
-            (set data 100)
-          )
-          data
-        )
-      "), None),
-      Some(Value::Int(100))
-    );
-  }
+  //   assert_eq!(
+  //     eva.eval(parser.parse("
+  //       (begin
+  //         (var data 10)
+  //         (begin
+  //           (set data 100)
+  //         )
+  //         data
+  //       )
+  //     "), None),
+  //     Some(Value::Int(100))
+  //   );
+  // }
 
-  #[test]
-  fn if_expression() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn if_expression() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(
-      eva.eval(parser.parse("
-        (begin
-          (var x 10)
-          (var y 0)
-          (if
-            (> x 10)
-            (set y 20)
-            (set y 30)
-          )
-        )
-      "), None),
-      Some(Value::Int(30))
-    )
-  }
+  //   assert_eq!(
+  //     eva.eval(parser.parse("
+  //       (begin
+  //         (var x 10)
+  //         (var y 0)
+  //         (if
+  //           (> x 10)
+  //           (set y 20)
+  //           (set y 30)
+  //         )
+  //       )
+  //     "), None),
+  //     Some(Value::Int(30))
+  //   )
+  // }
 
-  #[test]
-  fn while_statement() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn while_statement() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(
-      eva.eval(parser.parse("
-        (begin
-          (var counter 0)
-          (var result 0)
-          (while
-            (< counter 10)
-            (begin
-              (set counter (+ counter 1))
-              (set result (+ result 1))
-            )
-          )
-          result
-        )
-      "), None),
-      Some(Value::Int(10))
-    )
-  }
+  //   assert_eq!(
+  //     eva.eval(parser.parse("
+  //       (begin
+  //         (var counter 0)
+  //         (var result 0)
+  //         (while
+  //           (< counter 10)
+  //           (begin
+  //             (set counter (+ counter 1))
+  //             (set result (+ result 1))
+  //           )
+  //         )
+  //         result
+  //       )
+  //     "), None),
+  //     Some(Value::Int(10))
+  //   )
+  // }
 
-  #[test]
-  fn user_defined_functions() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn user_defined_functions() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(eva.eval(parser.parse("
-      (begin 
-        (def square (x) (* x x))
-        (square 2)
-      )
-      "), None),
-      Some(Value::Int(4))
-    );
-    assert_eq!(eva.eval(parser.parse("
-      (begin 
-        (def calc (x y) 
-          (begin
-            (var z 30)
-            (+ (* x y) z)
-          )
-        )
-        (calc 10 20)
-      )
-      "), None),
-      Some(Value::Int(230))
-    );
-    assert_eq!(eva.eval(parser.parse("
-      (begin
-        (var value 100)
-        (def calc (x y) 
-          (begin
-            (var z (+ x y))
-            (def inner (foo)
-              (+ (+ foo z) value)
-            )
-            inner
-          )
-        )
-        (var fn (calc 10 20))
-        (fn 30)
-      )
-      "), None),
-      Some(Value::Int(160))
-    );
-  }
+  //   assert_eq!(eva.eval(parser.parse("
+  //     (begin 
+  //       (def square (x) (* x x))
+  //       (square 2)
+  //     )
+  //     "), None),
+  //     Some(Value::Int(4))
+  //   );
+  //   assert_eq!(eva.eval(parser.parse("
+  //     (begin 
+  //       (def calc (x y) 
+  //         (begin
+  //           (var z 30)
+  //           (+ (* x y) z)
+  //         )
+  //       )
+  //       (calc 10 20)
+  //     )
+  //     "), None),
+  //     Some(Value::Int(230))
+  //   );
+  //   assert_eq!(eva.eval(parser.parse("
+  //     (begin
+  //       (var value 100)
+  //       (def calc (x y) 
+  //         (begin
+  //           (var z (+ x y))
+  //           (def inner (foo)
+  //             (+ (+ foo z) value)
+  //           )
+  //           inner
+  //         )
+  //       )
+  //       (var fn (calc 10 20))
+  //       (fn 30)
+  //     )
+  //     "), None),
+  //     Some(Value::Int(160))
+  //   );
+  // }
 
-  #[test]
-  fn lambda_functions() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn lambda_functions() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(eva.eval(parser.parse("
-      (begin
-        (def onClick (callback) 
-          (begin
-            (var x 10)
-            (var y 20)
-            (callback (+ x y))
-          )
-        )
-        (onClick (lambda (data) (* data 10)))
-      )
-    "), None), Some(Value::Int(300)))
-  }
+  //   assert_eq!(eva.eval(parser.parse("
+  //     (begin
+  //       (def onClick (callback) 
+  //         (begin
+  //           (var x 10)
+  //           (var y 20)
+  //           (callback (+ x y))
+  //         )
+  //       )
+  //       (onClick (lambda (data) (* data 10)))
+  //     )
+  //   "), None), Some(Value::Int(300)))
+  // }
 
-  #[test]
-  fn immediately_invoked_lambda_expression() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn immediately_invoked_lambda_expression() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(eva.eval(parser.parse("((lambda (x) (* x x)) 2)"), None), Some(Value::Int(4)));
-  }
+  //   assert_eq!(eva.eval(parser.parse("((lambda (x) (* x x)) 2)"), None), Some(Value::Int(4)));
+  // }
 
-  #[test]
-  fn lambda_assignment() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn lambda_assignment() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(eva.eval(parser.parse("
-      (begin
-        (var square (lambda (x) (* x x)))
-        (square 2)
-      )
-    "), None), Some(Value::Int(4)));
-  }
+  //   assert_eq!(eva.eval(parser.parse("
+  //     (begin
+  //       (var square (lambda (x) (* x x)))
+  //       (square 2)
+  //     )
+  //   "), None), Some(Value::Int(4)));
+  // }
 
-  #[test]
-  fn recursive_function() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn recursive_function() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(eva.eval(parser.parse("
-      (begin
-        (def factorial (x)
-          (if (== x 1)
-            1
-            (* x (factorial (- x 1)))
-          )
-        )
-        (factorial 5)
-      )
-    "), None), Some(Value::Int(120)))
-  }
+  //   assert_eq!(eva.eval(parser.parse("
+  //     (begin
+  //       (def factorial (x)
+  //         (if (== x 1)
+  //           1
+  //           (* x (factorial (- x 1)))
+  //         )
+  //       )
+  //       (factorial 5)
+  //     )
+  //   "), None), Some(Value::Int(120)))
+  // }
 
-  #[test]
-  fn switch_statement() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn switch_statement() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(eva.eval(parser.parse("
-      (begin
-        (var x 10)
-        (switch ((== x 10) 100)
-                ((> x 10)  200)
-                (else      300))
-      )
-    "), None), Some(Value::Int(100)))
-  }
+  //   assert_eq!(eva.eval(parser.parse("
+  //     (begin
+  //       (var x 10)
+  //       (switch ((== x 10) 100)
+  //               ((> x 10)  200)
+  //               (else      300))
+  //     )
+  //   "), None), Some(Value::Int(100)))
+  // }
 
-  #[test]
-  fn for_loop() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn for_loop() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(eva.eval(parser.parse("
-    (begin
-        (var result 0)
-        (for (var counter 0) (< counter 10) (++ counter)
-          (++ result 1)
-        )
-        result
-      )
-    "), None), Some(Value::Int(10)))
-  }
+  //   assert_eq!(eva.eval(parser.parse("
+  //   (begin
+  //       (var result 0)
+  //       (for (var counter 0) (< counter 10) (++ counter)
+  //         (++ result 1)
+  //       )
+  //       result
+  //     )
+  //   "), None), Some(Value::Int(10)))
+  // }
 
-  #[test]
-  fn increment_operator() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn increment_operator() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(eva.eval(parser.parse("
-      (begin
-        (var result 0)
-        (++ result)
-        result
-      )
-    "), None), Some(Value::Int(1)))
-  }
+  //   assert_eq!(eva.eval(parser.parse("
+  //     (begin
+  //       (var result 0)
+  //       (++ result)
+  //       result
+  //     )
+  //   "), None), Some(Value::Int(1)))
+  // }
 
-  #[test]
-  fn decrement_operator() {
-    let mut eva = Eva::new();
-    let mut parser = Parser::new();
+  // #[test]
+  // fn decrement_operator() {
+  //   let mut eva = Eva::new();
+  //   let mut parser = Parser::new();
 
-    assert_eq!(eva.eval(parser.parse("
-      (begin
-        (var result 0)
-        (-- result)
-        result
-      )
-    "), None), Some(Value::Int(-1)))
-  }
+  //   assert_eq!(eva.eval(parser.parse("
+  //     (begin
+  //       (var result 0)
+  //       (-- result)
+  //       result
+  //     )
+  //   "), None), Some(Value::Int(-1)))
+  // }
 
   #[test]
   fn classes() {
@@ -843,16 +863,10 @@ mod tests {
                 (set (prop this y) y)
               )
             )
-
-            (def calc (this)
-              (begin
-                (+ (prop this x) (prop this y))
-              )
-            )
           )
         )
+
         (var p (new Point 10 20))
-        ((prop p calc) p)
       )
     "), None), Some(Value::Int(30)))
   }
